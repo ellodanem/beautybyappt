@@ -1,0 +1,51 @@
+---
+description: Cloudflare D1 sync safeguards (this project only — not Vercel/Neon)
+alwaysApply: true
+---
+
+# D1 database sync (Beauty By Appointment — Cloudflare only)
+
+This project uses **Cloudflare D1** with separate local and remote databases.  
+**Vercel + Neon projects do not need this** — they share one `DATABASE_URL` and have no local/remote split.
+
+## Source of truth
+
+**Remote Cloudflare D1 (production) is the default source of truth.** Keris and MUAs use the live URL; local D1 is a developer copy.
+
+## Git vs data
+
+| User says | Action |
+|-----------|--------|
+| **commit and push** | Git only — deploy code. **Never** run `db:push` or import SQL to remote. |
+| **pull remote D1 to local** / **sync D1 from production** | `pnpm run db:pull` |
+| **push local D1 to remote** | Only if user **explicitly** requests overwriting production |
+| **compare local vs remote data** | `pnpm run db:status` |
+
+## Push is destructive — require confirmation
+
+**Never run `db:push` unless the user clearly asks to overwrite production data.**
+
+Push requires one of:
+- `pnpm run db:push -- --confirm-overwrite-remote`
+- `D1_PUSH_CONFIRM=beautybyappt-db pnpm run db:push`
+
+Before push, the script **auto-backs up remote** to `.d1-backups/`.
+
+## Default workflows
+
+**Debugging a production bug from desktop:**
+1. `pnpm run db:pull` — get production data locally
+2. Fix code and test on localhost
+3. `commit and push` — deploy code fix only
+4. Push data back **only** if user explicitly confirms after pull
+
+**Do not** use "pull then push" routinely — only when intentionally round-tripping data.
+
+**Small production data fixes:** prefer surgical SQL:
+`wrangler d1 execute beautybyappt-db --remote --command "UPDATE ..."`
+instead of a full push.
+
+## If user asks to sync but direction is unclear
+
+Ask: **pull (production → local)** or **push (local → production, overwrites cloud)**?
+Default recommendation: **pull**.

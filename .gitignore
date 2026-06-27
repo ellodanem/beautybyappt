@@ -6,3 +6,7 @@ data.db
 .vite
 .dev.vars
 .wrangler
+.d1-backups/
+remote-data-import.sql
+local-data-import.sql
+remote-snapshot.sql
