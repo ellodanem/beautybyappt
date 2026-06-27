@@ -3,7 +3,9 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { get, query, run } from "./db.js";
 import { getBranding } from "./branding.js";
 import { formatMoney } from "../shared/currency.js";
+import { PLATFORM_NAME } from "../shared/branding.js";
 import { getConfiguredFromAddress } from "./email-domain.js";
+import { getBusinessUtcOffsetHours } from "./business-locale.js";
 
 export type NotificationEnv = {
   RESEND_API_KEY?: string;
@@ -236,7 +238,7 @@ function buildConfirmationText(
   branding: { business_name: string; business_tagline: string },
   includeReceipt: boolean,
 ): { subject: string; text: string; html: string } {
-  const businessName = branding.business_name.trim() || "Your salon";
+  const businessName = branding.business_name.trim() || PLATFORM_NAME;
   const dateLabel = formatAppointmentDate(ctx.scheduled_date);
   const timeLabel = `${formatAppointmentTime(ctx.start_time)} – ${formatAppointmentTime(ctx.end_time)}`;
   const currency = ctx.currency || "USD";
@@ -308,7 +310,7 @@ function buildShortConfirmationText(
   branding: { business_name: string },
   includeReceipt: boolean,
 ): string {
-  const businessName = branding.business_name.trim() || "Your salon";
+  const businessName = branding.business_name.trim() || PLATFORM_NAME;
   const dateLabel = formatAppointmentDate(ctx.scheduled_date);
   const timeLabel = formatAppointmentTime(ctx.start_time);
   const parts = [
@@ -329,7 +331,7 @@ function buildReminderText(
   branding: { business_name: string; business_tagline: string },
   window: ReminderWindow,
 ): { subject: string; text: string; html: string } {
-  const businessName = branding.business_name.trim() || "Your salon";
+  const businessName = branding.business_name.trim() || PLATFORM_NAME;
   const dateLabel = formatAppointmentDate(ctx.scheduled_date);
   const timeLabel = `${formatAppointmentTime(ctx.start_time)} – ${formatAppointmentTime(ctx.end_time)}`;
   const currency = ctx.currency || "USD";
@@ -416,7 +418,7 @@ function buildShortReminderText(
   branding: { business_name: string },
   window: ReminderWindow,
 ): string {
-  const businessName = branding.business_name.trim() || "Your salon";
+  const businessName = branding.business_name.trim() || PLATFORM_NAME;
   const dateLabel = formatAppointmentDate(ctx.scheduled_date);
   const timeLabel = formatAppointmentTime(ctx.start_time);
   const whenLabel = window.hoursBefore === 24 ? "tomorrow" : "in 2 hrs";
@@ -639,7 +641,7 @@ export interface ReminderRunResult {
 
 export async function processAppointmentReminders(env: NotificationEnv): Promise<ReminderRunResult> {
   const settings = await getNotificationSettings(env);
-  const utcOffset = parseFloat((await getMetaValue("business_utc_offset")) || "-4");
+  const utcOffset = await getBusinessUtcOffsetHours();
   const now = Date.now();
 
   const appointments = await query<{

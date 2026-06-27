@@ -128,6 +128,8 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('remind_24h_enabled', '1');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('remind_2h_enabled', '1');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_payments_enabled', '0');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('business_utc_offset', '-4');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('business_country', 'LC');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('business_timezone', 'America/St_Lucia');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('resend_domain_id', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain_status', '');

@@ -1,11 +1,11 @@
-name = "open-salon"
+name = "beautybyappt"
 main = "src/server/index.ts"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "open-salon-db"
+database_name = "beautybyappt-db"
 database_id = "local"
 
 [triggers]

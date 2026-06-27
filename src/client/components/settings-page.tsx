@@ -12,6 +12,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { getCurrency } from "../../shared/currency";
 
+import { formatTimeInTimezone, timezoneOptionsForCountry } from "../../shared/locale";
+
 import { MAX_LOGO_DATA_URL_BYTES } from "../../shared/branding";
 
 import { BusinessHeader } from "./business-header";
@@ -25,6 +27,9 @@ export function SettingsPage() {
     defaultCurrency,
     currencyOptions,
     updateDefaultCurrency,
+    businessLocale,
+    localeCountryOptions,
+    updateBusinessLocale,
     branding,
     updateBranding,
     uploadBrandingLogo,
@@ -52,6 +57,11 @@ export function SettingsPage() {
   const [currencySaving, setCurrencySaving] = useState(false);
 
   const [currencySaved, setCurrencySaved] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState(businessLocale.country);
+  const [selectedTimezone, setSelectedTimezone] = useState(businessLocale.timezone);
+  const [localeSaving, setLocaleSaving] = useState(false);
+  const [localeSaved, setLocaleSaved] = useState(false);
+  const [localTimePreview, setLocalTimePreview] = useState("");
   const [eventOverrideSaving, setEventOverrideSaving] = useState(false);
   const [stripeSaving, setStripeSaving] = useState(false);
   const [notificationSaving, setNotificationSaving] = useState(false);
@@ -82,6 +92,22 @@ export function SettingsPage() {
     setSelected(defaultCurrency);
 
   }, [defaultCurrency]);
+
+  useEffect(() => {
+    setSelectedCountry(businessLocale.country);
+    setSelectedTimezone(businessLocale.timezone);
+  }, [businessLocale.country, businessLocale.timezone]);
+
+  useEffect(() => {
+    const tick = () => setLocalTimePreview(formatTimeInTimezone(selectedTimezone));
+    tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [selectedTimezone]);
+
+  const timezoneOptions = timezoneOptionsForCountry(selectedCountry);
+  const localeDirty = selectedCountry !== businessLocale.country
+    || selectedTimezone !== businessLocale.timezone;
 
 
 
@@ -910,6 +936,148 @@ export function SettingsPage() {
           {notificationSaved && <p className="text-emerald-600">Notification settings saved.</p>}
         </CardContent>
       </Card>
+
+      <Card className="max-w-lg">
+
+        <CardHeader>
+
+          <CardTitle className="text-base">Location &amp; timezone</CardTitle>
+
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+
+          <p className="text-sm text-muted-foreground">
+
+            Where your business operates. Appointment times, reminders, and the calendar use this timezone.
+
+          </p>
+
+          <div className="space-y-1.5">
+
+            <Label htmlFor="business-country">Country</Label>
+
+            <select
+
+              id="business-country"
+
+              className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+
+              value={selectedCountry}
+
+              onChange={(e) => {
+
+                const code = (e.target as HTMLSelectElement).value;
+
+                setSelectedCountry(code);
+
+                const tzOpts = timezoneOptionsForCountry(code);
+
+                setSelectedTimezone(tzOpts[0]?.value ?? businessLocale.timezone);
+
+                setLocaleSaved(false);
+
+              }}
+
+            >
+
+              {localeCountryOptions.map((opt) => (
+
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+
+              ))}
+
+            </select>
+
+          </div>
+
+          <div className="space-y-1.5">
+
+            <Label htmlFor="business-timezone">Timezone</Label>
+
+            <select
+
+              id="business-timezone"
+
+              className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+
+              value={selectedTimezone}
+
+              disabled={timezoneOptions.length <= 1}
+
+              onChange={(e) => {
+
+                setSelectedTimezone((e.target as HTMLSelectElement).value);
+
+                setLocaleSaved(false);
+
+              }}
+
+            >
+
+              {timezoneOptions.map((opt) => (
+
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+
+              ))}
+
+            </select>
+
+          </div>
+
+          {localTimePreview && (
+
+            <p className="text-sm">
+
+              Current time: <span className="font-semibold">{localTimePreview}</span>
+
+            </p>
+
+          )}
+
+          {localeSaved && <p className="text-sm text-emerald-600">Saved.</p>}
+
+          <Button
+
+            className="h-11"
+
+            disabled={localeSaving || !localeDirty}
+
+            onClick={async () => {
+
+              setLocaleSaving(true);
+
+              setLocaleSaved(false);
+
+              try {
+
+                await updateBusinessLocale(selectedCountry, selectedTimezone);
+
+                setLocaleSaved(true);
+
+              } catch (err) {
+
+                setError((err as Error).message);
+
+              } finally {
+
+                setLocaleSaving(false);
+
+              }
+
+            }}
+
+          >
+
+            {localeSaving ? "Saving…" : "Save location"}
+
+          </Button>
+
+        </CardContent>
+
+      </Card>
+
+
 
       <Card className="max-w-lg">
 

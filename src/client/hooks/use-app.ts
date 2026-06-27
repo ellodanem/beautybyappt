@@ -46,6 +46,14 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const [defaultCurrency, setDefaultCurrency] = useState("USD");
   const [currencyOptions, setCurrencyOptions] = useState<{ value: string; label: string }[]>([]);
+  const [businessLocale, setBusinessLocale] = useState({
+    country: "LC",
+    timezone: "America/St_Lucia",
+    utc_offset_hours: -4,
+    utc_offset_label: "UTC−4",
+  });
+  const [localeCountryOptions, setLocaleCountryOptions] = useState<{ value: string; label: string }[]>([]);
+  const [localeTimezoneOptions, setLocaleTimezoneOptions] = useState<{ value: string; label: string }[]>([]);
   const [branding, setBranding] = useState({ business_name: "", business_tagline: "", logo_url: "" });
   const [offerings, setOfferings] = useState<OfferingSummary[]>([]);
   const [calendarOfferingSlots, setCalendarOfferingSlots] = useState<OfferingSlotInstance[]>([]);
@@ -84,6 +92,45 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     );
     setDefaultCurrency(data.default_currency);
     setCurrencyOptions(data.supported);
+  }, []);
+
+  const fetchLocaleSettings = useCallback(async () => {
+    const data = await api<{
+      country: string;
+      timezone: string;
+      utc_offset_hours: number;
+      utc_offset_label: string;
+      countries: { value: string; label: string }[];
+      timezones: { value: string; label: string }[];
+    }>("GET", "/api/settings/locale");
+    setBusinessLocale({
+      country: data.country,
+      timezone: data.timezone,
+      utc_offset_hours: data.utc_offset_hours,
+      utc_offset_label: data.utc_offset_label,
+    });
+    setLocaleCountryOptions(data.countries);
+    setLocaleTimezoneOptions(data.timezones);
+  }, []);
+
+  const updateBusinessLocale = useCallback(async (country: string, timezone: string) => {
+    const res = await api<{
+      country: string;
+      timezone: string;
+      utc_offset_hours: number;
+      utc_offset_label: string;
+    }>("PUT", "/api/settings/locale", { country, timezone });
+    setBusinessLocale(res);
+    const refreshed = await api<{
+      country: string;
+      timezone: string;
+      utc_offset_hours: number;
+      utc_offset_label: string;
+      countries: { value: string; label: string }[];
+      timezones: { value: string; label: string }[];
+    }>("GET", "/api/settings/locale");
+    setLocaleCountryOptions(refreshed.countries);
+    setLocaleTimezoneOptions(refreshed.timezones);
   }, []);
 
   const fetchBranding = useCallback(async () => {
@@ -355,6 +402,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
           fetchProducts(productsPag, ""),
           fetchLookups(),
           fetchCurrencySettings(),
+          fetchLocaleSettings(),
           fetchBranding(),
           fetchOfferings(),
           fetchEventOverrideSettings(),
@@ -616,6 +664,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     addProduct, updateProduct, deleteProduct,
     clientLookup, staffLookup,
     defaultCurrency, currencyOptions, updateDefaultCurrency,
+    businessLocale, localeCountryOptions, localeTimezoneOptions, updateBusinessLocale,
     blockRegularOnEventDays, updateBlockRegularOnEventDays,
     stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, updateStripePaymentsEnabled,
     notificationSettings, updateNotificationSettings,

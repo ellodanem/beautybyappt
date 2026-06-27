@@ -1,6 +1,6 @@
-# Open Salon — Potential MVP
+# Beauty By Appointment — MVP Roadmap
 
-Living document for features discussed during evaluation of Open Salon as a self-hosted alternative to Salonist / Fresha.
+Living document for features discussed while building Beauty By Appointment (originally forked from Open Salon).
 
 **Last updated:** 2026-06-26
 

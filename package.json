@@ -1,10 +1,10 @@
 {
-  "name": "@clawnify/open-salon",
+  "name": "beautybyappt",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler d1 execute open-salon-db --local --file=src/server/schema.sql && concurrently -n ui,api -c cyan,green \"vite --host\" \"wrangler dev --port 8787\"",
+    "dev": "wrangler d1 execute beautybyappt-db --local --file=src/server/schema.sql && concurrently -n ui,api -c cyan,green \"vite --host\" \"wrangler dev --port 8787\"",
     "build": "vite build"
   },
   "dependencies": {

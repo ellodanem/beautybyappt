@@ -1,6 +1,6 @@
 {
-  "name": "Salon & Booking Manager",
-  "description": "Appointment scheduling and business management for salons, spas, barbershops, tattoo studios, nail salons, pet groomers, personal trainers, yoga studios, med spas, physiotherapy clinics, tutoring centers, and any appointment-based business. Like Salonist, Fresha, Square Appointments, or Vagaro. Features a day calendar with staff columns, service catalog, client management, product inventory, and blocked time slots.",
+  "name": "Beauty By Appointment",
+  "description": "Booking and business management for makeup artists and beauty professionals. Booking links, Stripe payments, calendar, clients, and branded public pages.",
   "framework": "preact+hono",
   "files": [
     "src/server/index.ts",

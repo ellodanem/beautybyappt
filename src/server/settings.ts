@@ -6,6 +6,8 @@ import {
   getGlobalBlockRegularOnEventDays,
   setGlobalBlockRegularOnEventDays,
 } from "./event-override.js";
+import { getBusinessLocale, setBusinessLocale } from "./business-locale.js";
+import { countryOptions, timezoneOptionsForCountry } from "../shared/locale.js";
 
 async function getDefaultCurrency(): Promise<string> {
   const row = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'default_currency'");
@@ -126,6 +128,77 @@ export function registerSettingsRoutes(app: OpenAPIHono<any>) {
     const { block_regular_on_event_days } = c.req.valid("json");
     await setGlobalBlockRegularOnEventDays(block_regular_on_event_days);
     return c.json({ block_regular_on_event_days }, 200);
+  });
+
+  const localeSchema = z.object({
+    country: z.string(),
+    timezone: z.string(),
+    utc_offset_hours: z.number(),
+    utc_offset_label: z.string(),
+  });
+
+  const getLocaleSettings = createRoute({
+    method: "get",
+    path: "/api/settings/locale",
+    responses: {
+      200: {
+        description: "Business country and timezone",
+        content: {
+          "application/json": {
+            schema: localeSchema.extend({
+              countries: z.array(z.object({ value: z.string(), label: z.string() })),
+              timezones: z.array(z.object({ value: z.string(), label: z.string() })),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  app.openapi(getLocaleSettings, async (c) => {
+    const locale = await getBusinessLocale();
+    return c.json({
+      ...locale,
+      countries: countryOptions(),
+      timezones: timezoneOptionsForCountry(locale.country),
+    }, 200);
+  });
+
+  const updateLocaleSettings = createRoute({
+    method: "put",
+    path: "/api/settings/locale",
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              country: z.string(),
+              timezone: z.string(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Updated",
+        content: { "application/json": { schema: localeSchema } },
+      },
+      400: {
+        description: "Invalid country or timezone",
+        content: { "application/json": { schema: z.object({ error: z.string() }) } },
+      },
+    },
+  });
+
+  app.openapi(updateLocaleSettings, async (c) => {
+    const { country, timezone } = c.req.valid("json");
+    try {
+      const locale = await setBusinessLocale(country, timezone);
+      return c.json(locale, 200);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
   });
 }
 

@@ -1,4 +1,9 @@
-export const DEFAULT_BUSINESS_NAME = "Salon Manager";
+/** Product/platform name when no custom business branding is set. */
+export const PLATFORM_NAME = "Beauty By Appointment";
+
+export const PLATFORM_TAGLINE = "Beauty, by appointment.";
+
+export const DEFAULT_BUSINESS_NAME = PLATFORM_NAME;
 
 export const MAX_BUSINESS_NAME = 100;
 export const MAX_BUSINESS_TAGLINE = 200;
@@ -18,7 +23,7 @@ export function businessDisplayName(name: string): string {
 
 export function businessInitials(name: string): string {
   const display = businessDisplayName(name);
-  if (display === DEFAULT_BUSINESS_NAME) return "SM";
+  if (display === DEFAULT_BUSINESS_NAME) return "BBA";
   return display
     .split(/\s+/)
     .filter(Boolean)

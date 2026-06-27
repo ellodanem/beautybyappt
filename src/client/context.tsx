@@ -84,6 +84,16 @@ export interface AppContextValue {
   currencyOptions: { value: string; label: string }[];
   updateDefaultCurrency: (code: string) => Promise<void>;
 
+  businessLocale: {
+    country: string;
+    timezone: string;
+    utc_offset_hours: number;
+    utc_offset_label: string;
+  };
+  localeCountryOptions: { value: string; label: string }[];
+  localeTimezoneOptions: { value: string; label: string }[];
+  updateBusinessLocale: (country: string, timezone: string) => Promise<void>;
+
   blockRegularOnEventDays: boolean;
   updateBlockRegularOnEventDays: (enabled: boolean) => Promise<void>;
 
