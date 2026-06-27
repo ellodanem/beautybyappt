@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -12,32 +11,20 @@ from d1_common import (
     INSERT_ORDER,
     ROOT,
     STATUS_TABLES,
+    apply_local_schema,
     backup_remote,
     database_id,
+    execute_local_sql,
+    fetch_local_counts_wrangler,
+    fetch_local_table,
     fetch_remote_counts,
     fetch_remote_table,
     generate_replace_sql,
-    local_db_path,
     run_wrangler,
 )
 
 PUSH_CONFIRM_FLAG = "--confirm-overwrite-remote"
 PUSH_CONFIRM_ENV = "D1_PUSH_CONFIRM"
-
-
-def ensure_local_schema() -> sqlite3.Connection:
-    db_path = local_db_path()
-    if not db_path.exists() or db_path.stat().st_size < 4096:
-        print("Local D1 missing or empty — applying schema.sql first…")
-        result = run_wrangler(["execute", "beautybyappt-db", "--local", "--file=src/server/schema.sql"])
-        if result.returncode != 0:
-            raise SystemExit(f"Failed to create local schema:\n{result.stderr or result.stdout}")
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    if "appointments" not in tables:
-        raise SystemExit("Local D1 has no appointments table. Run `pnpm dev` once, then retry pull.")
-    return conn
 
 
 def cmd_status() -> int:
@@ -47,20 +34,9 @@ def cmd_status() -> int:
     for table in STATUS_TABLES:
         print(f"  {table}: {remote[table]}")
 
-    db_path = local_db_path()
-    if not db_path.exists():
-        print("\nLocal: (no local database file yet)")
-        return 0
-
-    conn = sqlite3.connect(db_path)
     print("\nLocal:")
-    for table in STATUS_TABLES:
-        try:
-            n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-        except sqlite3.Error:
-            n = "missing"
-        print(f"  {table}: {n}")
-    conn.close()
+    for table, count in fetch_local_counts_wrangler().items():
+        print(f"  {table}: {count}")
     return 0
 
 
@@ -68,30 +44,20 @@ def cmd_pull(skip_backup: bool) -> int:
     if not skip_backup:
         backup_remote("before-pull")
 
-    conn = ensure_local_schema()
+    print("Applying local schema…")
+    apply_local_schema()
+
     rows_by_table: dict[str, list[dict]] = {}
     for table in INSERT_ORDER:
         rows = fetch_remote_table(table)
         rows_by_table[table] = rows
         print(f"  fetched {table}: {len(rows)} rows")
 
-    for table in CLEAR_ORDER:
-        conn.execute(f"DELETE FROM {table}")
-    conn.commit()
-
-    for table in INSERT_ORDER:
-        rows = rows_by_table.get(table) or []
-        if not rows:
-            continue
-        cols = list(rows[0].keys())
-        placeholders = ", ".join("?" for _ in cols)
-        col_list = ", ".join(cols)
-        conn.executemany(
-            f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})",
-            [[row.get(col) for col in cols] for row in rows],
-        )
-    conn.commit()
-    conn.close()
+    import_sql = BACKUP_DIR / "pull-local-replace.sql"
+    BACKUP_DIR.mkdir(exist_ok=True)
+    import_sql.write_text(generate_replace_sql(rows_by_table), encoding="utf-8")
+    print(f"Importing into local D1 via wrangler ({import_sql.name})…")
+    execute_local_sql(import_sql)
     print("\nPull complete — local D1 now matches remote.")
     return 0
 
@@ -107,15 +73,12 @@ def cmd_push(force: bool) -> int:
         return 1
 
     remote = fetch_remote_counts()
-    db_path = local_db_path()
-    if not db_path.exists():
-        print("No local D1 file to push.")
+    local_counts = fetch_local_counts_wrangler()
+    if all(count == "missing" for count in local_counts.values()):
+        print("No local D1 data to push.")
         return 1
 
-    conn = sqlite3.connect(db_path)
-    local = {}
-    for table in STATUS_TABLES:
-        local[table] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    local = {table: count for table, count in local_counts.items() if isinstance(count, int)}
 
     print("Before push:")
     for table in STATUS_TABLES:
@@ -131,12 +94,7 @@ def cmd_push(force: bool) -> int:
 
     rows_by_table: dict[str, list[dict]] = {}
     for table in INSERT_ORDER:
-        cols = [d[1] for d in conn.execute(f"PRAGMA table_info({table})").fetchall()]
-        if not cols:
-            continue
-        cur = conn.execute(f"SELECT * FROM {table}")
-        rows_by_table[table] = [dict(zip(cols, row)) for row in cur.fetchall()]
-    conn.close()
+        rows_by_table[table] = fetch_local_table(table)
 
     out = ROOT / "remote-data-import.sql"
     out.write_text(generate_replace_sql(rows_by_table), encoding="utf-8")

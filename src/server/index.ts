@@ -17,6 +17,7 @@ import { derivePaymentStatus } from "../shared/payment.js";
 import { loadPendingPaymentSummary } from "./appointment-payments.js";
 import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate } from "./clients.js";
 import { deleteStaffCascade } from "./staff.js";
+import { registerAuthRoutes, createAuthMiddleware } from "./auth.js";
 
 type Env = {
   Bindings: {
@@ -28,6 +29,8 @@ type Env = {
     RESEND_API_KEY?: string;
     EMAIL_FROM?: string;
     CRON_SECRET?: string;
+    ADMIN_PASSWORD?: string;
+    SESSION_SECRET?: string;
   };
 };
 
@@ -40,6 +43,9 @@ app.use("*", async (c, next) => {
   await ensureSqliteSchema();
   await next();
 });
+
+registerAuthRoutes(app);
+app.use("/api/*", createAuthMiddleware());
 
 // ── Shared Schemas ─────────────────────────────────────────────────
 

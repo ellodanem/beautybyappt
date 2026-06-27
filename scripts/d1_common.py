@@ -72,7 +72,16 @@ def local_db_path() -> Path:
 
 def run_wrangler(args: list[str]) -> subprocess.CompletedProcess[str]:
     parts = ["pnpm", "exec", "wrangler", "d1", *args]
-    return subprocess.run(parts, cwd=ROOT, capture_output=True, text=True, check=False, shell=True)
+    return subprocess.run(
+        parts,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        shell=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def backup_remote(label: str) -> Path:
@@ -107,14 +116,49 @@ def fetch_local_counts(conn) -> dict[str, int]:
 
 
 def fetch_remote_counts() -> dict[str, int]:
+    return fetch_table_counts("--remote")
+
+
+def fetch_local_counts_wrangler() -> dict[str, int | str]:
+    try:
+        return fetch_table_counts("--local")
+    except SystemExit:
+        return {table: "missing" for table in STATUS_TABLES}
+
+
+def fetch_table_counts(target: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for table in STATUS_TABLES:
-        result = run_wrangler(["execute", "beautybyappt-db", "--remote", "--json", "--command", f"SELECT COUNT(*) as n FROM {table}"])
+        result = run_wrangler([
+            "execute", DB_NAME, target, "--json", "--command", f"SELECT COUNT(*) as n FROM {table}",
+        ])
         if result.returncode != 0:
-            raise SystemExit(f"Failed to count remote {table}:\n{result.stderr or result.stdout}")
+            raise SystemExit(f"Failed to count {target} {table}:\n{result.stderr or result.stdout}")
         payload = json.loads(result.stdout)
         counts[table] = payload[0]["results"][0]["n"]
     return counts
+
+
+def fetch_local_table(table: str) -> list[dict]:
+    result = run_wrangler(["execute", DB_NAME, "--local", "--json", "--command", f"SELECT * FROM {table}"])
+    if result.returncode != 0:
+        raise SystemExit(f"Failed to read local {table}:\n{result.stderr or result.stdout}")
+    payload = json.loads(result.stdout)
+    if not payload or not payload[0].get("success"):
+        raise SystemExit(f"Local query failed for {table}: {result.stdout}")
+    return payload[0].get("results") or []
+
+
+def apply_local_schema() -> None:
+    result = run_wrangler(["execute", DB_NAME, "--local", "--file=src/server/schema.sql"])
+    if result.returncode != 0:
+        raise SystemExit(f"Failed to apply local schema:\n{result.stderr or result.stdout}")
+
+
+def execute_local_sql(path: Path) -> None:
+    result = run_wrangler(["execute", DB_NAME, "--local", f"--file={path}"])
+    if result.returncode != 0:
+        raise SystemExit(f"Failed to execute local SQL ({path.name}):\n{result.stderr or result.stdout}")
 
 
 def sql_literal(value) -> str:

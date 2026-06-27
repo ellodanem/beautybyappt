@@ -41,6 +41,8 @@ Preact · Tailwind CSS v4 · shadcn/ui · Hono · Neon (PostgreSQL) on Vercel ·
    - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
    - `RESEND_API_KEY`, `EMAIL_FROM`
    - `CRON_SECRET` — random string (Vercel Cron sends `Authorization: Bearer …`)
+   - `ADMIN_PASSWORD` — staff login password for the admin UI
+   - `SESSION_SECRET` — random string used to sign session cookies (can differ from `ADMIN_PASSWORD`)
 4. Deploy. Point Stripe webhooks to `https://your-domain/api/stripe/webhook`.
 
 Local dev still uses Wrangler + D1 (`pnpm dev`). No PC needs to stay on — Vercel and Neon run in the cloud.

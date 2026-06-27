@@ -1,5 +1,5 @@
 import { render } from "preact";
-import { App } from "./app";
+import { AdminGate } from "./admin-gate";
 import { PublicBookPage } from "./public-book";
 import { PublicBookSuccessPage } from "./public-book-success";
 import { PublicPaySuccessPage } from "./public-pay-success";
@@ -31,5 +31,5 @@ if (paySuccessMatch) {
 } else if (offerMatch) {
   render(<PublicOfferPage slug={decodeURIComponent(offerMatch[1])} />, document.getElementById("app")!);
 } else {
-  render(<App />, document.getElementById("app")!);
+  render(<AdminGate />, document.getElementById("app")!);
 }

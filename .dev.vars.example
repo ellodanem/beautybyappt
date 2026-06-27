@@ -19,3 +19,7 @@ EMAIL_FROM=onboarding@resend.dev
 
 # Optional: protect POST /api/cron/reminders (hourly cron also runs automatically)
 CRON_SECRET=local-dev-cron-secret
+
+# Staff admin access (required for calendar, clients, settings, etc.)
+ADMIN_PASSWORD=changeme
+SESSION_SECRET=local-dev-session-secret-change-in-production

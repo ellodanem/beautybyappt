@@ -1,6 +1,6 @@
 import { useApp } from "../context";
 
-import { CalendarDays, Clock, Users, UserCog, Sparkles, Settings, Menu, X } from "lucide-preact";
+import { CalendarDays, Clock, Users, UserCog, Sparkles, Settings, Menu, X, LogOut } from "lucide-preact";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { businessDisplayName } from "../../shared/branding";
 
 import { BusinessLogo } from "./business-header";
+
+import { api } from "../api";
 
 import type { View } from "../types";
 
@@ -207,6 +209,20 @@ export function Sidebar({
       </nav>
 
       <Separator />
+
+      <div className="px-2 pb-2">
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 text-sidebar-foreground/70"
+          onClick={async () => {
+            await api("POST", "/api/auth/logout");
+            window.location.reload();
+          }}
+        >
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </Button>
+      </div>
 
       <div className="flex items-center justify-around px-4 py-4">
 
