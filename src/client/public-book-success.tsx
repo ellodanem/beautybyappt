@@ -1,8 +1,9 @@
 import { useState, useEffect } from "preact/hooks";
 import { api } from "./api";
 import { BusinessHeader } from "./components/business-header";
+import { PublicPageShell } from "./components/public-page-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Branding } from "../shared/branding";
+import { usePublicBranding } from "./hooks/use-public-branding";
 import { formatMoney } from "../shared/currency";
 
 function formatDate(dateStr: string): string {
@@ -20,7 +21,9 @@ function formatTime(t: string): string {
 export function PublicBookSuccessPage({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [publicBranding, setPublicBranding] = useState<Branding | null>(null);
+  const publicPage = usePublicBranding();
+  const publicBranding = publicPage?.branding ?? null;
+  const platform = publicPage?.platform ?? null;
   const [appointment, setAppointment] = useState<{
     identifier: string;
     scheduled_date: string;
@@ -33,12 +36,6 @@ export function PublicBookSuccessPage({ token }: { token: string }) {
     payment_status: string;
     currency?: string;
   } | null>(null);
-
-  useEffect(() => {
-    api<Branding>("GET", "/api/public/branding")
-      .then(setPublicBranding)
-      .catch(() => setPublicBranding({ business_name: "", business_tagline: "", logo_url: "" }));
-  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -68,22 +65,22 @@ export function PublicBookSuccessPage({ token }: { token: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <PublicPageShell platform={platform} contentClassName="flex flex-1 items-center justify-center p-4">
         <p className="text-muted-foreground">Confirming your payment…</p>
-      </div>
+      </PublicPageShell>
     );
   }
 
   if (error || !appointment) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <PublicPageShell platform={platform} contentClassName="flex flex-1 items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardContent className="space-y-2 pt-6 text-center">
             <p className="text-destructive">{error || "Could not confirm booking"}</p>
             <a href={`/book/${token}`} className="text-sm text-primary underline">Back to booking</a>
           </CardContent>
         </Card>
-      </div>
+      </PublicPageShell>
     );
   }
 
@@ -96,7 +93,7 @@ export function PublicBookSuccessPage({ token }: { token: string }) {
   const balanceDue = Math.max(0, appointment.total_price - amountPaid);
 
   return (
-    <div className="min-h-screen bg-background p-4 pb-8">
+    <PublicPageShell platform={platform}>
       <div className="mx-auto max-w-md space-y-4 pt-8">
         {publicBranding && <BusinessHeader branding={publicBranding} />}
         <Card>
@@ -127,6 +124,6 @@ export function PublicBookSuccessPage({ token }: { token: string }) {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </PublicPageShell>
   );
 }

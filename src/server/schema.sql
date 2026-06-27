@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS staff (
   title TEXT DEFAULT '',
   color TEXT NOT NULL DEFAULT '#7c3aed',
   active INTEGER NOT NULL DEFAULT 1,
+  is_admin INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -135,12 +136,13 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('resend_domain_id', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain_status', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain_records', '[]');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_from_address', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('subscription_plan', 'free');
 
 -- Custom booking links (A1)
 CREATE TABLE IF NOT EXISTS booking_links (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token TEXT NOT NULL UNIQUE,
-  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
   scheduled_date TEXT NOT NULL,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
@@ -168,8 +170,8 @@ WHERE EXISTS (SELECT 1 FROM clients LIMIT 1)
    OR EXISTS (SELECT 1 FROM products LIMIT 1);
 
 -- Example staff
-INSERT INTO staff (id, name, email, title, color)
-SELECT 1, 'Alex', 'alex@example.com', 'Senior Stylist', '#3b82f6'
+INSERT INTO staff (id, name, email, title, color, is_admin)
+SELECT 1, 'Alex', 'alex@example.com', 'Senior Stylist', '#3b82f6', 1
 WHERE NOT EXISTS (SELECT 1 FROM _meta WHERE key = 'seed_demo_data' AND value = '1');
 INSERT INTO staff (id, name, email, title, color)
 SELECT 2, 'Jordan', 'jordan@example.com', 'Therapist', '#10b981'

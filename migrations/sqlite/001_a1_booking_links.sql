@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS booking_links (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   token TEXT NOT NULL UNIQUE,
-  staff_id INTEGER NOT NULL REFERENCES staff(id),
+  staff_id INTEGER NOT NULL REFERENCES staff(id) ON DELETE CASCADE,
   scheduled_date TEXT NOT NULL,
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,

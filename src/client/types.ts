@@ -36,6 +36,7 @@ export interface Appointment {
   appointment_offering_addons?: AppointmentOfferingAddon[];
   appointment_services?: AppointmentService[];
   appointment_notes?: AppointmentNote[];
+  pending_payment?: { amount: number; currency: string; created_at: string } | null;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +87,7 @@ export interface Staff {
   title: string;
   color: string;
   active: number;
+  is_admin: number;
   appointment_count?: number;
   created_at: string;
 }

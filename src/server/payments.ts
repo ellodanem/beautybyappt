@@ -1,7 +1,9 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { createRoute, z } from "@hono/zod-openapi";
 import { finalizeBookingLinkCheckout } from "./booking-link-payments.js";
+import { finalizeAppointmentPaymentCheckout } from "./appointment-payments.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
+import { runtimeEnv } from "./runtime-env.js";
 import {
   isStripeConfigured,
   parseStripeWebhookEvent,
@@ -16,7 +18,7 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerPaymentRoutes(app: OpenAPIHono<any>) {
   app.post("/api/webhooks/stripe", async (c) => {
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
     const payload = await c.req.text();
     const signature = c.req.header("stripe-signature");
 
@@ -28,7 +30,16 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
-      if (session.metadata?.type === "booking_link_deposit" && session.id) {
+      if (session.metadata?.type === "appointment_payment" && session.id) {
+        try {
+          const result = await finalizeAppointmentPaymentCheckout(env, session.id);
+          if (!result.already_done) {
+            scheduleBookingConfirmation(c, result.appointment_id, { receipt: true });
+          }
+        } catch (err) {
+          console.error("Appointment payment webhook failed:", (err as Error).message);
+        }
+      } else if (session.metadata?.type === "booking_link_deposit" && session.id) {
         try {
           const result = await finalizeBookingLinkCheckout(env, session.id);
           scheduleBookingConfirmation(c, result.appointment_id, { receipt: true });
@@ -61,7 +72,7 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(getStripeSettings, async (c) => {
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
     return c.json({
       configured: isStripeConfigured(env),
       webhook_configured: Boolean(env.STRIPE_WEBHOOK_SECRET?.trim()),
@@ -102,7 +113,7 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(updateStripeSettings, async (c) => {
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
     const { payments_enabled } = c.req.valid("json");
     if (payments_enabled && !isStripeConfigured(env)) {
       return c.json({ error: "Add STRIPE_SECRET_KEY before enabling online payments" }, 400);

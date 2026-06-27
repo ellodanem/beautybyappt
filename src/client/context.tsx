@@ -130,6 +130,12 @@ export interface AppContextValue {
   selectAppointment: (id: number | null) => Promise<void>;
   addAppointmentNote: (aptId: number, content: string) => Promise<void>;
   deleteAppointmentNote: (noteId: number) => Promise<void>;
+  sendAppointmentPaymentLink: (id: number) => Promise<{
+    checkout_url: string;
+    session_id: string;
+    amount: number;
+    currency: string;
+  }>;
 
   // Calendar
   calendarAppointments: Appointment[];

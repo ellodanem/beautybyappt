@@ -523,6 +523,21 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     }
   }, [selectedAppointment]);
 
+  const sendAppointmentPaymentLink = useCallback(async (id: number) => {
+    const res = await api<{
+      checkout_url: string;
+      session_id: string;
+      amount: number;
+      currency: string;
+    }>("POST", `/api/appointments/${id}/payment-link`);
+    await navigator.clipboard.writeText(res.checkout_url);
+    if (selectedAppointment && selectedAppointment.id === id) {
+      const aptRes = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
+      setSelectedAppointment(aptRes.appointment);
+    }
+    return res;
+  }, [selectedAppointment]);
+
   // ── Calendar / Blocked Slots ──
 
   const addBlockedSlot = useCallback(async (data: { staff_id: number; blocked_date: string; start_time: string; end_time: string; reason?: string }) => {
@@ -602,10 +617,22 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, [fetchStaff, fetchLookups]);
 
   const deleteStaff = useCallback(async (id: number) => {
-    await api("DELETE", `/api/staff/${id}`);
-    await fetchStaff();
-    await Promise.all([fetchStats(), fetchLookups()]);
-  }, [fetchStaff, fetchStats, fetchLookups]);
+    const staff = staffMembers.find((s) => s.id === id);
+    const label = staff?.name || "This staff member";
+    if (staff?.is_admin && staffMembers.filter((s) => s.is_admin).length === 1) {
+      setError(`${label} is the only admin. Assign another admin before deleting them.`);
+      return;
+    }
+    if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+    try {
+      setError(null);
+      await api("DELETE", `/api/staff/${id}`);
+      await fetchStaff();
+      await Promise.all([fetchStats(), fetchLookups()]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [staffMembers, fetchStaff, fetchStats, fetchLookups]);
 
   // ── Services CRUD ──
 
@@ -652,7 +679,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
     addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
-    selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote,
+    selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote, sendAppointmentPaymentLink,
     calendarAppointments, calendarBlocked, calendarEventDay, calendarDate, setCalendarDate,
     addBlockedSlot, deleteBlockedSlot,
     clients, clientsPag, setClientsPage, clientsSearch, setClientsSearch,

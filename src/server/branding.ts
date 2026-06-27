@@ -8,6 +8,8 @@ import {
   MAX_LOGO_URL_LENGTH,
   type Branding,
 } from "../shared/branding.js";
+import { getPublicPlatformBranding } from "./platform-branding.js";
+import { getBusinessLocale } from "./business-locale.js";
 
 const ALLOWED_DATA_IMAGE_PREFIXES = [
   "data:image/png;base64,",
@@ -159,18 +161,35 @@ export function registerBrandingRoutes(app: OpenAPIHono<any>) {
     return c.json(await getBranding(), 200);
   });
 
+  const PublicBrandingSchema = BrandingSchema.extend({
+    platform: z.object({
+      plan: z.enum(["free", "pro", "premium"]),
+      show_footer: z.boolean(),
+      show_signup_promo: z.boolean(),
+      platform_name: z.string(),
+      platform_url: z.string(),
+      signup_url: z.string(),
+    }),
+    timezone: z.string(),
+  });
+
   const getPublicBranding = createRoute({
     method: "get",
     path: "/api/public/branding",
     responses: {
       200: {
         description: "Public branding for client-facing pages",
-        content: { "application/json": { schema: BrandingSchema } },
+        content: { "application/json": { schema: PublicBrandingSchema } },
       },
     },
   });
 
   app.openapi(getPublicBranding, async (c) => {
-    return c.json(await getBranding(), 200);
+    const locale = await getBusinessLocale();
+    return c.json({
+      ...(await getBranding()),
+      platform: await getPublicPlatformBranding(),
+      timezone: locale.timezone,
+    }, 200);
   });
 }

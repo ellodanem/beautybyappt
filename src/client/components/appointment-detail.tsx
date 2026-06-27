@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../context";
-import { ArrowLeft, Trash2, Send, Clock, User } from "lucide-preact";
+import { ArrowLeft, Trash2, Send, Clock, User, Copy, Check } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -47,6 +47,7 @@ export function AppointmentDetail() {
   const {
     selectedAppointment: apt, navigate, updateAppointment, updateAppointmentAddons, deleteAppointment,
     addAppointmentNote, deleteAppointmentNote, staffLookup, defaultCurrency,
+    stripeConfigured, stripePaymentsEnabled, sendAppointmentPaymentLink, setError,
   } = useApp();
   const [noteText, setNoteText] = useState("");
   const [totalPrice, setTotalPrice] = useState("");
@@ -55,6 +56,9 @@ export function AppointmentDetail() {
   const [customDeposit, setCustomDeposit] = useState("");
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [paymentSaved, setPaymentSaved] = useState(false);
+  const [paymentLinkSending, setPaymentLinkSending] = useState(false);
+  const [paymentLinkCopied, setPaymentLinkCopied] = useState(false);
+  const [lastPaymentLinkUrl, setLastPaymentLinkUrl] = useState<string | null>(null);
   const [selectedAddonIds, setSelectedAddonIds] = useState<number[]>([]);
   const [extrasSaving, setExtrasSaving] = useState(false);
   const [extrasSaved, setExtrasSaved] = useState(false);
@@ -68,6 +72,8 @@ export function AppointmentDetail() {
     setCustomDeposit(savedDeposit > 0 ? String(savedDeposit) : "");
     setAmountPaid(apt.amount_paid ? String(apt.amount_paid) : "");
     setPaymentSaved(false);
+    setPaymentLinkCopied(false);
+    setLastPaymentLinkUrl(null);
     setSelectedAddonIds((apt.appointment_offering_addons ?? []).map((a) => a.offering_addon_id));
     setExtrasSaved(false);
   }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons]);
@@ -106,6 +112,23 @@ export function AppointmentDetail() {
     || previewDeposit !== (apt.deposit_amount ?? 0)
     || previewPaid !== (apt.amount_paid ?? 0);
 
+  const stripePaymentsReady = stripeConfigured && stripePaymentsEnabled;
+  const canSendPaymentLink =
+    stripePaymentsReady
+    && previewTotal > 0
+    && previewBalance > 0
+    && !paymentDirty;
+
+  const paymentLinkDisabledReason = !stripePaymentsReady
+    ? "Enable Stripe payments in Settings"
+    : paymentDirty
+      ? "Save payment changes first"
+      : previewTotal <= 0
+        ? "No amount to collect"
+        : previewBalance <= 0
+          ? "Fully paid"
+          : null;
+
   const extrasSubtotal = offeringAddons
     .filter((addon) => addon.id != null && selectedAddonIds.includes(addon.id))
     .reduce((sum, addon) => sum + addon.price, 0);
@@ -139,6 +162,33 @@ export function AppointmentDetail() {
       setPaymentSaved(true);
     } finally {
       setPaymentSaving(false);
+    }
+  };
+
+  const handleSendPaymentLink = async () => {
+    setPaymentLinkSending(true);
+    setPaymentLinkCopied(false);
+    setError(null);
+    try {
+      const res = await sendAppointmentPaymentLink(apt.id);
+      setLastPaymentLinkUrl(res.checkout_url);
+      setPaymentLinkCopied(true);
+      window.setTimeout(() => setPaymentLinkCopied(false), 2500);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setPaymentLinkSending(false);
+    }
+  };
+
+  const handleCopyPaymentLink = async () => {
+    if (!lastPaymentLinkUrl) return;
+    try {
+      await navigator.clipboard.writeText(lastPaymentLinkUrl);
+      setPaymentLinkCopied(true);
+      window.setTimeout(() => setPaymentLinkCopied(false), 2500);
+    } catch {
+      setError("Could not copy to clipboard");
     }
   };
 
@@ -237,8 +287,14 @@ export function AppointmentDetail() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Record deposits, extras, and payments collected outside Stripe (cash, transfer, etc.).
+                Send a Stripe payment link for the balance due, or record cash and transfer payments manually below.
               </p>
+              {apt.pending_payment && previewBalance > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  Pending Stripe link for {formatMoney(apt.pending_payment.amount, apt.pending_payment.currency || currency)}.
+                  Sending a new link will replace the previous one.
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="payment-total" className="text-xs text-muted-foreground">Total ({currency})</Label>
@@ -329,12 +385,35 @@ export function AppointmentDetail() {
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <Button size="sm" disabled={!paymentDirty || paymentSaving} onClick={handleSavePayment}>
                   {paymentSaving ? "Saving…" : "Save payment"}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!canSendPaymentLink || paymentLinkSending}
+                  onClick={handleSendPaymentLink}
+                  title={paymentLinkDisabledReason ?? undefined}
+                >
+                  <Send className="mr-1 h-3.5 w-3.5" />
+                  {paymentLinkSending ? "Creating…" : "Send payment link"}
+                </Button>
+                {lastPaymentLinkUrl && (
+                  <Button size="sm" variant="ghost" onClick={handleCopyPaymentLink}>
+                    {paymentLinkCopied ? (
+                      <Check className="mr-1 h-3.5 w-3.5 text-emerald-600" />
+                    ) : (
+                      <Copy className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    {paymentLinkCopied ? "Copied" : "Copy link"}
+                  </Button>
+                )}
                 {paymentSaved && !paymentDirty && (
                   <span className="text-sm text-emerald-600">Saved</span>
+                )}
+                {paymentLinkCopied && !paymentLinkSending && (
+                  <span className="text-sm text-emerald-600">Link copied</span>
                 )}
               </div>
             </CardContent>

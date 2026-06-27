@@ -141,6 +141,13 @@ export async function retrieveCheckoutSession(
   });
 }
 
+export async function expireCheckoutSession(
+  env: StripeEnv,
+  sessionId: string,
+): Promise<void> {
+  await stripeRequest<{ id: string }>(env, "POST", `/checkout/sessions/${sessionId}/expire`, {});
+}
+
 export async function verifyStripeWebhook(
   payload: string,
   signatureHeader: string | undefined,

@@ -1,6 +1,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { get, query, run } from "./db.js";
+import { runtimeEnv } from "./runtime-env.js";
 import { getDefaultCurrency } from "./settings.js";
 import { isValidCurrency, DEFAULT_CURRENCY } from "../shared/currency.js";
 import {
@@ -222,7 +223,7 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
 
   app.openapi(getPublicBookingLink, async (c) => {
     const { token } = c.req.valid("param");
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
     const row = await loadBookingLinkByToken(token);
     if (!row) return c.json({ error: "Link not found" }, 404);
 
@@ -311,7 +312,7 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
   app.openapi(confirmPublicBooking, async (c) => {
     const { token } = c.req.valid("param");
     const body = c.req.valid("json");
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
 
     const row = await loadBookingLinkByToken(token);
     if (!row) return c.json({ error: "Link not found" }, 404);
@@ -412,7 +413,7 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
   app.openapi(completePublicBooking, async (c) => {
     const { token } = c.req.valid("param");
     const { session_id: sessionId } = c.req.valid("query");
-    const env = c.env as StripeEnv;
+    const env = runtimeEnv(c.env) as StripeEnv;
 
     const row = await loadBookingLinkByToken(token);
     if (!row) return c.json({ error: "Link not found" }, 404);

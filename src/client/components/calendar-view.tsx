@@ -28,6 +28,67 @@ function formatHour(h: number): string {
   return `${h - 12} PM`;
 }
 
+interface TimedLayoutItem {
+  id: number;
+  startMin: number;
+  endMin: number;
+}
+
+function layoutCluster(cluster: TimedLayoutItem[]): Map<number, { column: number; totalColumns: number }> {
+  const sorted = [...cluster].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  const columns: TimedLayoutItem[][] = [];
+
+  for (const item of sorted) {
+    let placed = false;
+    for (const col of columns) {
+      const last = col[col.length - 1];
+      if (last.endMin <= item.startMin) {
+        col.push(item);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) columns.push([item]);
+  }
+
+  const totalColumns = columns.length;
+  const result = new Map<number, { column: number; totalColumns: number }>();
+  for (let colIdx = 0; colIdx < columns.length; colIdx++) {
+    for (const item of columns[colIdx]) {
+      result.set(item.id, { column: colIdx, totalColumns });
+    }
+  }
+  return result;
+}
+
+function layoutOverlappingTimedItems(items: TimedLayoutItem[]): Map<number, { column: number; totalColumns: number }> {
+  if (items.length === 0) return new Map();
+
+  const sorted = [...items].sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
+  const result = new Map<number, { column: number; totalColumns: number }>();
+
+  let cluster: TimedLayoutItem[] = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    if (cluster.length === 0) return;
+    for (const [id, pos] of layoutCluster(cluster)) {
+      result.set(id, pos);
+    }
+    cluster = [];
+    clusterEnd = -Infinity;
+  };
+
+  for (const item of sorted) {
+    if (cluster.length > 0 && item.startMin >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.endMin);
+  }
+  flush();
+
+  return result;
+}
+
 function getCalendarHours(slots: OfferingSlotInstance[]): number[] {
   let minH = 7;
   let maxH = 20;
@@ -551,6 +612,13 @@ export function CalendarView() {
           {staffLookup.map((member) => {
             const memberAppts = calendarAppointments.filter((a) => a.staff_id === member.id);
             const memberBlocked = calendarBlocked.filter((b) => b.staff_id === member.id);
+            const apptLayout = layoutOverlappingTimedItems(
+              memberAppts.map((apt) => ({
+                id: apt.id,
+                startMin: timeToMinutes(apt.start_time) - dayStart,
+                endMin: timeToMinutes(apt.end_time) - dayStart,
+              })),
+            );
             return (
               <div key={member.id} className="flex min-w-[180px] flex-1 flex-col border-r last:border-r-0">
                 <div className="flex items-center justify-center gap-2 border-b bg-muted/20 px-3 py-2.5">
@@ -593,6 +661,7 @@ export function CalendarView() {
                     const endMin = timeToMinutes(apt.end_time) - dayStart;
                     const top = (startMin / totalMinutes) * totalHeight;
                     const height = ((endMin - startMin) / totalMinutes) * totalHeight;
+                    const position = apptLayout.get(apt.id);
                     return (
                       <CalendarAppointmentBlock
                         key={apt.id}
@@ -600,6 +669,8 @@ export function CalendarView() {
                         now={now}
                         top={top}
                         height={height}
+                        column={position?.column}
+                        totalColumns={position?.totalColumns}
                         borderColor={member.color}
                         backgroundColor={`${member.color}14`}
                         onOpen={() => navigate(`/appointments/${apt.id}`)}
@@ -615,6 +686,13 @@ export function CalendarView() {
           {(() => {
             const unassigned = calendarAppointments.filter((a) => !a.staff_id);
             if (unassigned.length === 0) return null;
+            const unassignedLayout = layoutOverlappingTimedItems(
+              unassigned.map((apt) => ({
+                id: apt.id,
+                startMin: timeToMinutes(apt.start_time) - dayStart,
+                endMin: timeToMinutes(apt.end_time) - dayStart,
+              })),
+            );
             return (
               <div className="flex min-w-[180px] flex-1 flex-col border-r last:border-r-0">
                 <div className="flex items-center justify-center gap-2 border-b bg-muted/20 px-3 py-2.5">
@@ -630,6 +708,7 @@ export function CalendarView() {
                     const endMin = timeToMinutes(apt.end_time) - dayStart;
                     const top = (startMin / totalMinutes) * totalHeight;
                     const height = ((endMin - startMin) / totalMinutes) * totalHeight;
+                    const position = unassignedLayout.get(apt.id);
                     return (
                       <CalendarAppointmentBlock
                         key={apt.id}
@@ -637,6 +716,8 @@ export function CalendarView() {
                         now={now}
                         top={top}
                         height={height}
+                        column={position?.column}
+                        totalColumns={position?.totalColumns}
                         borderColor="rgb(156 163 175 / 0.4)"
                         backgroundColor="rgb(243 244 246 / 0.5)"
                         onOpen={() => navigate(`/appointments/${apt.id}`)}

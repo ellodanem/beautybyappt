@@ -1,6 +1,7 @@
 # Copy to `.dev.vars` in the project root (never commit real keys).
 
-
+# Local Wrangler dev uses Cloudflare D1 (SQLite). Vercel production uses Neon:
+# DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
 
 STRIPE_SECRET_KEY=sk_test_your_key_here
 

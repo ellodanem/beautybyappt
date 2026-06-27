@@ -10,6 +10,11 @@ import { MobileNavTrigger } from "./mobile-nav-trigger";
 export function StaffList() {
   const { staffMembers, deleteStaff, updateStaff } = useApp();
   const [showCreate, setShowCreate] = useState(false);
+  const adminCount = staffMembers.filter((s) => s.is_admin).length;
+
+  const makeAdmin = async (id: number) => {
+    await updateStaff(id, { is_admin: 1 });
+  };
 
   return (
     <div className="space-y-4 p-4 pb-8 md:p-6">
@@ -33,6 +38,7 @@ export function StaffList() {
               <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="font-semibold">{s.name}</h3>
+                  {s.is_admin ? <Badge>Admin</Badge> : null}
                   {!s.active && <Badge variant="secondary">Inactive</Badge>}
                 </div>
                 {s.title && <p className="text-sm text-muted-foreground">{s.title}</p>}
@@ -40,7 +46,7 @@ export function StaffList() {
                 {s.phone && <p className="text-xs text-muted-foreground">{s.phone}</p>}
                 <p className="mt-1 text-xs text-muted-foreground">{s.appointment_count || 0} appointments</p>
               </div>
-              <div className="flex gap-1">
+              <div className="flex flex-col gap-1">
                 {s.active ? (
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => updateStaff(s.id, { active: 0 })}>
                     <Pencil className="h-3.5 w-3.5" />
@@ -48,9 +54,16 @@ export function StaffList() {
                 ) : (
                   <Button variant="outline" size="sm" onClick={() => updateStaff(s.id, { active: 1 })}>Activate</Button>
                 )}
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => deleteStaff(s.id)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {!s.is_admin && (
+                  <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => makeAdmin(s.id)}>
+                    Make Admin
+                  </Button>
+                )}
+                {!(s.is_admin && adminCount === 1) && (
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => deleteStaff(s.id)}>
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
               </div>
             </CardContent>
           </Card>

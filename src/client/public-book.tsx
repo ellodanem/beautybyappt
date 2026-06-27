@@ -12,7 +12,8 @@ import {
   type PaymentChoice,
 } from "../shared/payment";
 import { BusinessHeader } from "./components/business-header";
-import type { Branding } from "../shared/branding";
+import { PublicPageShell } from "./components/public-page-shell";
+import { usePublicBranding } from "./hooks/use-public-branding";
 
 interface PublicLink {
   scheduled_date: string;
@@ -66,13 +67,9 @@ export function PublicBookPage({ token }: { token: string }) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
-  const [publicBranding, setPublicBranding] = useState<Branding | null>(null);
-
-  useEffect(() => {
-    api<Branding>("GET", "/api/public/branding")
-      .then(setPublicBranding)
-      .catch(() => setPublicBranding({ business_name: "", business_tagline: "", logo_url: "" }));
-  }, []);
+  const publicPage = usePublicBranding();
+  const publicBranding = publicPage?.branding ?? null;
+  const platform = publicPage?.platform ?? null;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -152,25 +149,25 @@ export function PublicBookPage({ token }: { token: string }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <PublicPageShell platform={platform} contentClassName="flex flex-1 items-center justify-center p-4">
         <p className="text-muted-foreground">Loading…</p>
-      </div>
+      </PublicPageShell>
     );
   }
 
   if (error && !link) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <PublicPageShell platform={platform} contentClassName="flex flex-1 items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardContent className="pt-6 text-center text-destructive">{error}</CardContent>
         </Card>
-      </div>
+      </PublicPageShell>
     );
   }
 
   if (confirmed && link) {
     return (
-      <div className="min-h-screen bg-background p-4 pb-8">
+      <PublicPageShell platform={platform}>
         <div className="mx-auto max-w-md space-y-4 pt-8">
           {publicBranding && <BusinessHeader branding={publicBranding} />}
           <Card>
@@ -185,7 +182,7 @@ export function PublicBookPage({ token }: { token: string }) {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </PublicPageShell>
     );
   }
 
@@ -201,7 +198,7 @@ export function PublicBookPage({ token }: { token: string }) {
   const stripeCheckout = stripeEnabled && paymentRequired;
 
   return (
-    <div className="min-h-screen bg-background p-4 pb-24">
+    <PublicPageShell platform={platform} contentClassName="flex-1 p-4 pb-8">
       <div className="mx-auto max-w-md space-y-4 pt-4">
         {publicBranding ? (
           <BusinessHeader branding={publicBranding} subtitle="Complete your details below" />
@@ -370,6 +367,6 @@ export function PublicBookPage({ token }: { token: string }) {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </PublicPageShell>
   );
 }

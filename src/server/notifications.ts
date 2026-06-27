@@ -1,6 +1,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { get, query, run } from "./db.js";
+import { runtimeEnv } from "./runtime-env.js";
 import { getBranding } from "./branding.js";
 import { formatMoney } from "../shared/currency.js";
 import { PLATFORM_NAME } from "../shared/branding.js";
@@ -709,7 +710,7 @@ export function scheduleBookingConfirmation(
   options?: { receipt?: boolean },
 ): void {
   if (!appointmentId) return;
-  const task = sendBookingConfirmation(ctx.env, appointmentId, options);
+  const task = sendBookingConfirmation(runtimeEnv(ctx.env), appointmentId, options);
   if (ctx.executionCtx) {
     ctx.executionCtx.waitUntil(task);
   } else {
@@ -741,7 +742,7 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(getSettings, async (c) => {
-    return c.json(await getNotificationSettings(c.env as NotificationEnv), 200);
+    return c.json(await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv), 200);
   });
 
   const updateSettings = createRoute({
@@ -791,11 +792,11 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
     if (body.remind_2h_enabled !== undefined) {
       await setMetaValue("remind_2h_enabled", body.remind_2h_enabled ? "1" : "0");
     }
-    return c.json(await getNotificationSettings(c.env as NotificationEnv), 200);
+    return c.json(await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv), 200);
   });
 
-  app.post("/api/cron/reminders", async (c) => {
-    const env = c.env as NotificationEnv & { CRON_SECRET?: string };
+  const runReminders = async (c: { env: NotificationEnv & { CRON_SECRET?: string }; req: { header: (name: string) => string | undefined } }) => {
+    const env = runtimeEnv(c.env) as NotificationEnv & { CRON_SECRET?: string };
     const configuredSecret = env.CRON_SECRET?.trim();
     if (configuredSecret) {
       const auth = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "")
@@ -808,5 +809,8 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
 
     const result = await processAppointmentReminders(env);
     return c.json(result, 200);
-  });
+  };
+
+  app.get("/api/cron/reminders", runReminders);
+  app.post("/api/cron/reminders", runReminders);
 }

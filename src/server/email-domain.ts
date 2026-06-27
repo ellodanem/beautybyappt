@@ -1,6 +1,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { get, run } from "./db.js";
+import { runtimeEnv } from "./runtime-env.js";
 
 const RESEND_API = "https://api.resend.com";
 
@@ -260,7 +261,7 @@ export function registerEmailDomainRoutes(app: OpenAPIHono<any>) {
       },
     },
   }), async (c) => {
-    return c.json(await getEmailDomainSettings(c.env as NotificationEnv), 200);
+    return c.json(await getEmailDomainSettings(runtimeEnv(c.env) as NotificationEnv), 200);
   });
 
   app.openapi(createRoute({
@@ -284,7 +285,7 @@ export function registerEmailDomainRoutes(app: OpenAPIHono<any>) {
     },
   }), async (c) => {
     const { domain } = c.req.valid("json");
-    const result = await connectEmailDomain(c.env as NotificationEnv, domain);
+    const result = await connectEmailDomain(runtimeEnv(c.env) as NotificationEnv, domain);
     if (result.error) return c.json({ error: result.error }, 400);
     return c.json(result.settings!, 200);
   });
@@ -300,7 +301,7 @@ export function registerEmailDomainRoutes(app: OpenAPIHono<any>) {
       400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
     },
   }), async (c) => {
-    const result = await verifyEmailDomain(c.env as NotificationEnv);
+    const result = await verifyEmailDomain(runtimeEnv(c.env) as NotificationEnv);
     if (result.error) return c.json({ error: result.error }, 400);
     return c.json(result.settings!, 200);
   });
@@ -316,7 +317,7 @@ export function registerEmailDomainRoutes(app: OpenAPIHono<any>) {
       400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
     },
   }), async (c) => {
-    const result = await refreshDomainFromResend(c.env as NotificationEnv);
+    const result = await refreshDomainFromResend(runtimeEnv(c.env) as NotificationEnv);
     if (result.error) return c.json({ error: result.error }, 400);
     return c.json(result.settings!, 200);
   });
@@ -342,7 +343,7 @@ export function registerEmailDomainRoutes(app: OpenAPIHono<any>) {
     },
   }), async (c) => {
     const { from_address } = c.req.valid("json");
-    const result = await setEmailFromAddress(c.env as NotificationEnv, from_address);
+    const result = await setEmailFromAddress(runtimeEnv(c.env) as NotificationEnv, from_address);
     if (result.error) return c.json({ error: result.error }, 400);
     return c.json(result.settings!, 200);
   });

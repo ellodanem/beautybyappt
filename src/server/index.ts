@@ -8,16 +8,20 @@ import { registerBrandingRoutes } from "./branding.js";
 import { registerOfferingRoutes } from "./offerings.js";
 import { registerAnytimeBookingRoutes } from "./anytime-booking.js";
 import { registerPaymentRoutes } from "./payments.js";
+import { registerAppointmentPaymentRoutes } from "./appointment-payments.js";
 import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
 import { backfillServiceSlugs, uniqueServiceSlug } from "./services.js";
 import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
 import { derivePaymentStatus } from "../shared/payment.js";
+import { loadPendingPaymentSummary } from "./appointment-payments.js";
 import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate } from "./clients.js";
+import { deleteStaffCascade } from "./staff.js";
 
 type Env = {
   Bindings: {
-    DB: D1Database;
+    DB?: D1Database;
+    DATABASE_URL?: string;
     STRIPE_SECRET_KEY?: string;
     STRIPE_WEBHOOK_SECRET?: string;
     APP_URL?: string;
@@ -27,10 +31,12 @@ type Env = {
   };
 };
 
-const app = new OpenAPIHono<Env>();
+import { runtimeEnv } from "./runtime-env.js";
+
+export const app = new OpenAPIHono<Env>();
 
 app.use("*", async (c, next) => {
-  initDB(c.env);
+  initDB(runtimeEnv(c.env));
   await ensureSqliteSchema();
   await next();
 });
@@ -61,6 +67,7 @@ const StaffSchema = z.object({
   title: z.string(),
   color: z.string(),
   active: z.number().int(),
+  is_admin: z.number().int(),
   appointment_count: z.number().int().optional(),
   created_at: z.string(),
 }).openapi("Staff");
@@ -145,6 +152,11 @@ const AppointmentSchema = z.object({
   appointment_offering_addons: z.array(AppointmentOfferingAddonSchema).optional(),
   appointment_services: z.array(AppointmentServiceSchema).optional(),
   appointment_notes: z.array(AppointmentNoteSchema).optional(),
+  pending_payment: z.object({
+    amount: z.number(),
+    currency: z.string(),
+    created_at: z.string(),
+  }).nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 }).openapi("Appointment");
@@ -178,6 +190,7 @@ const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }
 
 registerBookingLinkRoutes(app);
 registerPaymentRoutes(app);
+registerAppointmentPaymentRoutes(app);
 registerSettingsRoutes(app);
 registerBrandingRoutes(app);
 registerNotificationRoutes(app);
@@ -307,6 +320,28 @@ app.openapi(listAppointments, async (c) => {
     [...params, limit, offset],
   );
 
+  if (appointments.length > 0) {
+    const aptIds = appointments.map((a) => a.id as number);
+    const assignedAddons = await query<Record<string, unknown>>(
+      `SELECT aoa.*, oa.name, oa.extra_duration
+       FROM appointment_offering_addons aoa
+       JOIN offering_addons oa ON oa.id = aoa.offering_addon_id
+       WHERE aoa.appointment_id IN (${aptIds.map(() => "?").join(",")})
+       ORDER BY oa.name`,
+      aptIds,
+    );
+    const addonsByAppointment = new Map<number, Record<string, unknown>[]>();
+    for (const addon of assignedAddons) {
+      const aptId = addon.appointment_id as number;
+      const list = addonsByAppointment.get(aptId);
+      if (list) list.push(addon);
+      else addonsByAppointment.set(aptId, [addon]);
+    }
+    for (const apt of appointments) {
+      apt.appointment_offering_addons = addonsByAppointment.get(apt.id as number) ?? [];
+    }
+  }
+
   return c.json({ appointments, total: total?.count || 0 }, 200);
 });
 
@@ -433,6 +468,9 @@ app.openapi(getAppointment, async (c) => {
       [apt.offering_id],
     );
   }
+
+  const pendingPayment = await loadPendingPaymentSummary(parseInt(String(id), 10));
+  apt.pending_payment = pendingPayment ?? null;
 
   return c.json({ appointment: apt }, 200);
 });
@@ -986,6 +1024,7 @@ const createStaff = createRoute({
       phone: z.string().optional(),
       title: z.string().optional(),
       color: z.string().optional(),
+      is_admin: z.number().int().optional(),
     }) } } },
   },
   responses: { 201: { description: "Created", content: { "application/json": { schema: z.object({ staff: StaffSchema }) } } } },
@@ -993,9 +1032,11 @@ const createStaff = createRoute({
 
 app.openapi(createStaff, async (c) => {
   const body = c.req.valid("json");
+  const adminCount = await get<{ count: number }>("SELECT COUNT(*) as count FROM staff WHERE is_admin = 1");
+  const isAdmin = (adminCount?.count || 0) === 0 ? 1 : (body.is_admin ? 1 : 0);
   const result = await run(
-    "INSERT INTO staff (name, email, phone, title, color) VALUES (?, ?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed"],
+    "INSERT INTO staff (name, email, phone, title, color, is_admin) VALUES (?, ?, ?, ?, ?, ?)",
+    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed", isAdmin],
   );
   const staff = await get<Record<string, unknown>>("SELECT * FROM staff WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ staff }, 201);
@@ -1013,14 +1054,37 @@ const updateStaff = createRoute({
       title: z.string().optional(),
       color: z.string().optional(),
       active: z.number().int().optional(),
+      is_admin: z.number().int().optional(),
     }) } } },
   },
-  responses: { 200: { description: "Updated", content: { "application/json": { schema: OkSchema } } } },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } },
+    409: { description: "Cannot remove sole admin", content: { "application/json": { schema: ErrorSchema } } },
+  },
 });
 
 app.openapi(updateStaff, async (c) => {
   const { id } = c.req.valid("param");
   const body = c.req.valid("json");
+  const existing = await get<{ id: number; name: string; is_admin: number }>(
+    "SELECT id, name, is_admin FROM staff WHERE id = ?",
+    [id],
+  );
+  if (!existing) return c.json({ error: "Not found" }, 404);
+
+  if (body.is_admin === 0 && existing.is_admin) {
+    const otherAdmins = await get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM staff WHERE is_admin = 1 AND id != ?",
+      [id],
+    );
+    if ((otherAdmins?.count || 0) === 0) {
+      return c.json(
+        { error: `${existing.name} is the only admin. Assign another admin before removing admin access.` },
+        409,
+      );
+    }
+  }
+
   const sets: string[] = [];
   const params: unknown[] = [];
   for (const [key, val] of Object.entries(body)) {
@@ -1036,12 +1100,41 @@ const deleteStaff = createRoute({
   method: "delete",
   path: "/api/staff/{id}",
   request: { params: IdParam },
-  responses: { 200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } } },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } },
+    409: { description: "Cannot delete sole admin", content: { "application/json": { schema: ErrorSchema } } },
+  },
 });
 
 app.openapi(deleteStaff, async (c) => {
   const { id } = c.req.valid("param");
-  await run("DELETE FROM staff WHERE id = ?", [id]);
+  const staff = await get<{ id: number; name: string; is_admin: number }>(
+    "SELECT id, name, is_admin FROM staff WHERE id = ?",
+    [id],
+  );
+  if (!staff) return c.json({ error: "Not found" }, 404);
+
+  if (staff.is_admin) {
+    const otherAdmins = await get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM staff WHERE is_admin = 1 AND id != ?",
+      [id],
+    );
+    if ((otherAdmins?.count || 0) === 0) {
+      return c.json(
+        { error: `${staff.name} is the only admin. Assign another admin before deleting them.` },
+        409,
+      );
+    }
+  }
+
+  try {
+    await deleteStaffCascade(id);
+  } catch {
+    return c.json(
+      { error: `${staff.name} could not be deleted because related booking records still exist.` },
+      409,
+    );
+  }
   return c.json({ ok: true }, 200);
 });
 
@@ -1296,14 +1389,3 @@ app.openapi(deleteProduct, async (c) => {
   return c.json({ ok: true }, 200);
 });
 
-export default {
-  fetch: app.fetch,
-  scheduled: async (_event, env, ctx) => {
-    initDB(env);
-    ctx.waitUntil(
-      processAppointmentReminders(env as NotificationEnv).catch((err) =>
-        console.error("[reminders] scheduled run failed:", err),
-      ),
-    );
-  },
-};

@@ -33,6 +33,7 @@ psql "$DATABASE_URL" -f migrations/postgres/001_a1_booking_links.sql
 
 | File | Description |
 |------|-------------|
+| `000_base_schema` | Full PostgreSQL schema for fresh Neon installs |
 | `001_a1_booking_links` | `clients.address`, `booking_links` table |
 | `002_currency` | `default_currency` setting, `currency` on links & appointments |
 | `003_h1_branding` | `business_name`, `business_tagline`, `logo_url` in `_meta` |

@@ -27,6 +27,7 @@ import { MobileNavTrigger } from "./mobile-nav-trigger";
 import { cn, formatDateShort, formatTimeShort } from "@/lib/utils";
 import { needsCloseOut } from "../../shared/appointment-closeout";
 import { CloseOutRowActions, useCloseOutClock } from "./close-out-row-actions";
+import { AppointmentExtrasChips } from "./appointment-extras-chips";
 import type { Appointment, AppointmentStatus } from "../types";
 
 
@@ -146,7 +147,10 @@ function AppointmentMobileCard({
 
       <div className="mb-2 flex items-start justify-between gap-2">
 
-        <p className="font-semibold leading-tight">{apt.client_name}</p>
+        <div className="min-w-0">
+          <p className="font-semibold leading-tight">{apt.client_name}</p>
+          <AppointmentExtrasChips appointment={apt} />
+        </div>
 
         <StatusBadge status={apt.status} />
 
@@ -494,7 +498,12 @@ export function AppointmentList() {
 
                           <TableCell className="text-xs">{formatTimeShort(apt.start_time)}</TableCell>
 
-                          <TableCell>{apt.client_name}</TableCell>
+                          <TableCell>
+                            <div>
+                              <span>{apt.client_name}</span>
+                              <AppointmentExtrasChips appointment={apt} />
+                            </div>
+                          </TableCell>
 
                           <TableCell>
 

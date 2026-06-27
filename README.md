@@ -29,7 +29,21 @@ Open `http://localhost:5173` in your browser.
 
 ## Tech Stack
 
-Preact · Tailwind CSS v4 · shadcn/ui · Hono · Cloudflare D1 (SQLite locally)
+Preact · Tailwind CSS v4 · shadcn/ui · Hono · Neon (PostgreSQL) on Vercel · Cloudflare D1 for local dev
+
+## Deploy (Vercel + Neon)
+
+1. Create a [Neon](https://neon.tech) project and copy the connection string.
+2. Run migrations: `DATABASE_URL="postgresql://…" pnpm run db:migrate`
+3. Import the repo at [vercel.com](https://vercel.com) and set environment variables:
+   - `DATABASE_URL` — Neon connection string
+   - `APP_URL` — your Vercel URL (e.g. `https://beautybyappt.vercel.app`)
+   - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`
+   - `RESEND_API_KEY`, `EMAIL_FROM`
+   - `CRON_SECRET` — random string (Vercel Cron sends `Authorization: Bearer …`)
+4. Deploy. Point Stripe webhooks to `https://your-domain/api/stripe/webhook`.
+
+Local dev still uses Wrangler + D1 (`pnpm dev`). No PC needs to stay on — Vercel and Neon run in the cloud.
 
 ## Attribution
 
