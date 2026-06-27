@@ -6,7 +6,12 @@ compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
 binding = "DB"
 database_name = "beautybyappt-db"
-database_id = "local"
+database_id = "dcf12f27-7eb9-409f-a7f1-099679b728ec"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = [ "/api/*" ]
 
 [triggers]
 crons = ["0 * * * *"]
