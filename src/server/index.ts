@@ -1,12 +1,37 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { initDB, query, get, run } from "./db.js";
+import { ensureSqliteSchema } from "./schema-migrate.js";
+import { addMinutes, nextIdentifier } from "./helpers.js";
+import { registerBookingLinkRoutes } from "./booking-links.js";
+import { registerSettingsRoutes } from "./settings.js";
+import { registerBrandingRoutes } from "./branding.js";
+import { registerOfferingRoutes } from "./offerings.js";
+import { registerAnytimeBookingRoutes } from "./anytime-booking.js";
+import { registerPaymentRoutes } from "./payments.js";
+import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
+import { registerEmailDomainRoutes } from "./email-domain.js";
+import { backfillServiceSlugs, uniqueServiceSlug } from "./services.js";
+import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
+import { derivePaymentStatus } from "../shared/payment.js";
+import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate } from "./clients.js";
 
-type Env = { Bindings: { DB: D1Database } };
+type Env = {
+  Bindings: {
+    DB: D1Database;
+    STRIPE_SECRET_KEY?: string;
+    STRIPE_WEBHOOK_SECRET?: string;
+    APP_URL?: string;
+    RESEND_API_KEY?: string;
+    EMAIL_FROM?: string;
+    CRON_SECRET?: string;
+  };
+};
 
 const app = new OpenAPIHono<Env>();
 
 app.use("*", async (c, next) => {
   initDB(c.env);
+  await ensureSqliteSchema();
   await next();
 });
 
@@ -20,8 +45,10 @@ const ClientSchema = z.object({
   name: z.string(),
   email: z.string(),
   phone: z.string(),
+  address: z.string().optional(),
   notes: z.string(),
   appointment_count: z.number().int().optional(),
+  active_booking_count: z.number().int().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 }).openapi("Client");
@@ -41,6 +68,7 @@ const StaffSchema = z.object({
 const ServiceSchema = z.object({
   id: z.number().int(),
   name: z.string(),
+  slug: z.string(),
   description: z.string(),
   duration: z.number().int(),
   price: z.number(),
@@ -66,6 +94,23 @@ const AppointmentServiceSchema = z.object({
   duration: z.number().int(),
 }).openapi("AppointmentService");
 
+const AppointmentOfferingAddonSchema = z.object({
+  id: z.number().int(),
+  appointment_id: z.number().int(),
+  offering_addon_id: z.number().int(),
+  price: z.number(),
+  name: z.string().optional(),
+  extra_duration: z.number().int().optional(),
+}).openapi("AppointmentOfferingAddon");
+
+const OfferingAddonSchema = z.object({
+  id: z.number().int().optional(),
+  name: z.string(),
+  price: z.number(),
+  extra_duration: z.number().int().optional(),
+  active: z.number().int().optional(),
+}).openapi("OfferingAddon");
+
 const AppointmentSchema = z.object({
   id: z.number().int(),
   identifier: z.string(),
@@ -76,6 +121,12 @@ const AppointmentSchema = z.object({
   start_time: z.string(),
   end_time: z.string(),
   total_price: z.number(),
+  currency: z.string().optional(),
+  deposit_amount: z.number().optional(),
+  amount_paid: z.number().optional(),
+  payment_status: z.string().optional(),
+  travel_fee: z.number().optional(),
+  service_address: z.string().optional(),
   notes: z.string(),
   is_recurring: z.number().int(),
   recurrence_interval: z.string(),
@@ -83,6 +134,15 @@ const AppointmentSchema = z.object({
   client_phone: z.string().optional(),
   staff_name: z.string().nullable().optional(),
   staff_color: z.string().nullable().optional(),
+  offering_name: z.string().nullable().optional(),
+  service_name: z.string().nullable().optional(),
+  offering_color: z.string().nullable().optional(),
+  service_color: z.string().nullable().optional(),
+  latest_note: z.string().nullable().optional(),
+  offering_id: z.number().int().nullable().optional(),
+  offering_base_price: z.number().nullable().optional(),
+  offering_addons: z.array(OfferingAddonSchema).optional(),
+  appointment_offering_addons: z.array(AppointmentOfferingAddonSchema).optional(),
   appointment_services: z.array(AppointmentServiceSchema).optional(),
   appointment_notes: z.array(AppointmentNoteSchema).optional(),
   created_at: z.string(),
@@ -116,23 +176,14 @@ const ProductSchema = z.object({
 
 const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }) });
 
-// ── Helpers ────────────────────────────────────────────────────────
-
-async function nextIdentifier(): Promise<string> {
-  const prefix = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_prefix'");
-  const counter = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_counter'");
-  const next = parseInt(counter?.value || "0", 10) + 1;
-  await run("UPDATE _meta SET value = ? WHERE key = 'appointment_counter'", [String(next)]);
-  return `${prefix?.value || "APT"}-${next}`;
-}
-
-function addMinutes(time: string, minutes: number): string {
-  const [h, m] = time.split(":").map(Number);
-  const total = h * 60 + m + minutes;
-  const hh = Math.floor(total / 60) % 24;
-  const mm = total % 60;
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-}
+registerBookingLinkRoutes(app);
+registerPaymentRoutes(app);
+registerSettingsRoutes(app);
+registerBrandingRoutes(app);
+registerNotificationRoutes(app);
+registerEmailDomainRoutes(app);
+registerOfferingRoutes(app);
+registerAnytimeBookingRoutes(app);
 
 // ── Stats ──────────────────────────────────────────────────────────
 
@@ -232,10 +283,24 @@ app.openapi(listAppointments, async (c) => {
 
   const appointments = await query<Record<string, unknown>>(
     `SELECT a.*, cl.name as client_name, cl.phone as client_phone,
-            s.name as staff_name, s.color as staff_color
+            s.name as staff_name, s.color as staff_color,
+            o.name as offering_name, o.color as offering_color,
+            (SELECT sv.name FROM appointment_services aps
+             LEFT JOIN services sv ON sv.id = aps.service_id
+             WHERE aps.appointment_id = a.id
+             ORDER BY aps.id LIMIT 1) as service_name,
+            (SELECT sv.color FROM appointment_services aps
+             LEFT JOIN services sv ON sv.id = aps.service_id
+             WHERE aps.appointment_id = a.id
+             ORDER BY aps.id LIMIT 1) as service_color,
+            (SELECT content FROM appointment_notes an
+             WHERE an.appointment_id = a.id
+             ORDER BY an.created_at DESC LIMIT 1) as latest_note
      FROM appointments a
      LEFT JOIN clients cl ON cl.id = a.client_id
      LEFT JOIN staff s ON s.id = a.staff_id
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     LEFT JOIN offerings o ON o.id = si.offering_id
      ${where}
      ORDER BY a.scheduled_date DESC, a.start_time ASC
      LIMIT ? OFFSET ?`,
@@ -258,6 +323,11 @@ const getCalendar = createRoute({
       content: { "application/json": { schema: z.object({
         appointments: z.array(AppointmentSchema),
         blocked_slots: z.array(BlockedSlotSchema),
+        event_day: z.object({
+          is_event_day: z.boolean(),
+          block_regular_bookings: z.boolean(),
+          event_names: z.array(z.string()),
+        }),
       }) } },
     },
   },
@@ -267,10 +337,12 @@ app.openapi(getCalendar, async (c) => {
   const { start, end } = c.req.valid("query");
   const appointments = await query<Record<string, unknown>>(
     `SELECT a.*, cl.name as client_name, cl.phone as client_phone,
-            s.name as staff_name, s.color as staff_color
+            s.name as staff_name, s.color as staff_color, o.name as offering_name
      FROM appointments a
      LEFT JOIN clients cl ON cl.id = a.client_id
      LEFT JOIN staff s ON s.id = a.staff_id
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     LEFT JOIN offerings o ON o.id = si.offering_id
      WHERE a.scheduled_date >= ? AND a.scheduled_date <= ? AND a.status != 'cancelled'
      ORDER BY a.start_time ASC`,
     [start, end],
@@ -295,7 +367,7 @@ app.openapi(getCalendar, async (c) => {
     [start, end],
   );
 
-  return c.json({ appointments, blocked_slots: blocked }, 200);
+  return c.json({ appointments, blocked_slots: blocked, event_day: await getEventDayInfo(start) }, 200);
 });
 
 // Get single appointment
@@ -316,10 +388,13 @@ app.openapi(getAppointment, async (c) => {
   const { id } = c.req.valid("param");
   const apt = await get<Record<string, unknown>>(
     `SELECT a.*, cl.name as client_name, cl.phone as client_phone,
-            s.name as staff_name, s.color as staff_color
+            s.name as staff_name, s.color as staff_color,
+            o.id as offering_id, o.name as offering_name, o.base_price as offering_base_price
      FROM appointments a
      LEFT JOIN clients cl ON cl.id = a.client_id
      LEFT JOIN staff s ON s.id = a.staff_id
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     LEFT JOIN offerings o ON o.id = si.offering_id
      WHERE a.id = ?`,
     [id],
   );
@@ -339,7 +414,118 @@ app.openapi(getAppointment, async (c) => {
   );
   apt.appointment_notes = notes;
 
+  const assignedAddons = await query<Record<string, unknown>>(
+    `SELECT aoa.*, oa.name, oa.extra_duration
+     FROM appointment_offering_addons aoa
+     JOIN offering_addons oa ON oa.id = aoa.offering_addon_id
+     WHERE aoa.appointment_id = ?
+     ORDER BY oa.name`,
+    [id],
+  );
+  apt.appointment_offering_addons = assignedAddons;
+
+  if (apt.offering_id) {
+    apt.offering_addons = await query<Record<string, unknown>>(
+      `SELECT id, name, price, extra_duration, active
+       FROM offering_addons
+       WHERE offering_id = ? AND active = 1
+       ORDER BY id`,
+      [apt.offering_id],
+    );
+  }
+
   return c.json({ appointment: apt }, 200);
+});
+
+const updateAppointmentAddons = createRoute({
+  method: "put",
+  path: "/api/appointments/{id}/addons",
+  request: {
+    params: IdParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ addon_ids: z.array(z.number().int()) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: OkSchema } } },
+    400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(updateAppointmentAddons, async (c) => {
+  const { id } = c.req.valid("param");
+  const { addon_ids } = c.req.valid("json");
+
+  const apt = await get<{
+    offering_slot_instance_id: number | null;
+    start_time: string;
+    travel_fee: number;
+  }>(
+    "SELECT offering_slot_instance_id, start_time, travel_fee FROM appointments WHERE id = ?",
+    [id],
+  );
+  if (!apt) return c.json({ error: "Not found" }, 404);
+  if (!apt.offering_slot_instance_id) {
+    return c.json({ error: "This appointment is not linked to an offering" }, 400);
+  }
+
+  const slot = await get<{
+    offering_id: number;
+    base_price: number;
+    duration: number;
+  }>(
+    `SELECT si.offering_id, o.base_price, o.duration
+     FROM offering_slot_instances si
+     JOIN offerings o ON o.id = si.offering_id
+     WHERE si.id = ?`,
+    [apt.offering_slot_instance_id],
+  );
+  if (!slot) return c.json({ error: "Offering slot not found" }, 404);
+
+  const uniqueIds = [...new Set(addon_ids)];
+  let addonPrice = 0;
+  let extraDuration = 0;
+  const selected: { id: number; price: number }[] = [];
+
+  if (uniqueIds.length > 0) {
+    const addons = await query<{ id: number; price: number; extra_duration: number }>(
+      `SELECT id, price, extra_duration FROM offering_addons
+       WHERE offering_id = ? AND active = 1 AND id IN (${uniqueIds.map(() => "?").join(",")})`,
+      [slot.offering_id, ...uniqueIds],
+    );
+    if (addons.length !== uniqueIds.length) {
+      return c.json({ error: "One or more add-ons are invalid for this offering" }, 400);
+    }
+    for (const addon of addons) {
+      addonPrice += addon.price;
+      extraDuration += addon.extra_duration;
+      selected.push({ id: addon.id, price: addon.price });
+    }
+  }
+
+  await run("DELETE FROM appointment_offering_addons WHERE appointment_id = ?", [id]);
+  for (const addon of selected) {
+    await run(
+      "INSERT INTO appointment_offering_addons (appointment_id, offering_addon_id, price) VALUES (?, ?, ?)",
+      [id, addon.id, addon.price],
+    );
+  }
+
+  const travelFee = apt.travel_fee ?? 0;
+  const totalPrice = slot.base_price + addonPrice + travelFee;
+  const endTime = addMinutes(apt.start_time, slot.duration + extraDuration);
+
+  await run(
+    "UPDATE appointments SET total_price = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
+    [totalPrice, endTime, id],
+  );
+
+  return c.json({ ok: true }, 200);
 });
 
 // Create appointment
@@ -356,15 +542,23 @@ const createAppointment = createRoute({
       is_recurring: z.number().int().optional(),
       recurrence_interval: z.string().optional(),
       service_ids: z.array(z.number().int()).optional(),
+      travel_fee: z.number().optional(),
+      service_address: z.string().optional(),
     }) } } },
   },
   responses: {
     201: { description: "Created", content: { "application/json": { schema: z.object({ appointment: AppointmentSchema }) } } },
+    400: { description: "Blocked or invalid", content: { "application/json": { schema: ErrorSchema } } },
   },
 });
 
 app.openapi(createAppointment, async (c) => {
   const body = c.req.valid("json");
+  try {
+    await assertRegularBookingAllowed(body.scheduled_date);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
   const identifier = await nextIdentifier();
   const startTime = body.start_time || "09:00";
 
@@ -372,6 +566,7 @@ app.openapi(createAppointment, async (c) => {
   let totalDuration = 60;
   let totalPrice = 0;
   const serviceIds = body.service_ids || [];
+  const travelFee = Math.max(0, body.travel_fee ?? 0);
 
   if (serviceIds.length > 0) {
     const svcs = await query<{ duration: number; price: number }>(
@@ -382,13 +577,15 @@ app.openapi(createAppointment, async (c) => {
     totalPrice = svcs.reduce((sum, s) => sum + s.price, 0);
   }
 
+  totalPrice += travelFee;
+
   const endTime = addMinutes(startTime, totalDuration);
 
   const result = await run(
-    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, notes, is_recurring, recurrence_interval)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, travel_fee, service_address, notes, is_recurring, recurrence_interval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [identifier, body.client_id, body.staff_id ?? null, body.scheduled_date,
-    startTime, endTime, totalPrice,
+    startTime, endTime, totalPrice, travelFee, body.service_address?.trim() || "",
     body.notes || "", body.is_recurring || 0, body.recurrence_interval || ""],
   );
 
@@ -415,6 +612,8 @@ app.openapi(createAppointment, async (c) => {
     [aptId],
   );
 
+  scheduleBookingConfirmation(c, aptId as number);
+
   return c.json({ appointment: apt }, 201);
 });
 
@@ -432,6 +631,10 @@ const updateAppointment = createRoute({
       start_time: z.string().optional(),
       end_time: z.string().optional(),
       total_price: z.number().optional(),
+      deposit_amount: z.number().optional(),
+      amount_paid: z.number().optional(),
+      travel_fee: z.number().optional(),
+      service_address: z.string().optional(),
       notes: z.string().optional(),
     }) } } },
   },
@@ -443,10 +646,43 @@ const updateAppointment = createRoute({
 app.openapi(updateAppointment, async (c) => {
   const { id } = c.req.valid("param");
   const body = c.req.valid("json");
+
+  const paymentTouched =
+    body.total_price !== undefined
+    || body.deposit_amount !== undefined
+    || body.amount_paid !== undefined;
+
+  const updates: Record<string, unknown> = { ...body };
+
+  if (paymentTouched) {
+    const current = await get<{ total_price: number; deposit_amount: number; amount_paid: number }>(
+      "SELECT total_price, deposit_amount, amount_paid FROM appointments WHERE id = ?",
+      [id],
+    );
+    const total = (body.total_price ?? current?.total_price ?? 0) as number;
+    const deposit = (body.deposit_amount ?? current?.deposit_amount ?? 0) as number;
+    const paid = (body.amount_paid ?? current?.amount_paid ?? 0) as number;
+    updates.payment_status = derivePaymentStatus(total, deposit, paid);
+  }
+
+  if (body.scheduled_date) {
+    const existing = await get<{ offering_slot_instance_id: number | null }>(
+      "SELECT offering_slot_instance_id FROM appointments WHERE id = ?",
+      [id],
+    );
+    if (!existing?.offering_slot_instance_id) {
+      try {
+        await assertRegularBookingAllowed(body.scheduled_date);
+      } catch (err) {
+        return c.json({ error: (err as Error).message }, 400);
+      }
+    }
+  }
+
   const sets: string[] = [];
   const params: unknown[] = [];
 
-  for (const [key, val] of Object.entries(body)) {
+  for (const [key, val] of Object.entries(updates)) {
     if (val !== undefined) { sets.push(`${key} = ?`); params.push(val); }
   }
   if (sets.length > 0) {
@@ -466,7 +702,24 @@ const deleteAppointment = createRoute({
 
 app.openapi(deleteAppointment, async (c) => {
   const { id } = c.req.valid("param");
-  await run("DELETE FROM appointments WHERE id = ?", [id]);
+  const apt = await get<{ offering_slot_instance_id: number | null }>(
+    "SELECT offering_slot_instance_id FROM appointments WHERE id = ?",
+    [id],
+  );
+  if (!apt) return c.json({ error: "Not found" }, 404);
+
+  try {
+    await run("UPDATE booking_links SET appointment_id = NULL WHERE appointment_id = ?", [id]);
+    if (apt.offering_slot_instance_id) {
+      await run(
+        "UPDATE offering_slot_instances SET booked_count = booked_count - 1 WHERE id = ? AND booked_count > 0",
+        [apt.offering_slot_instance_id],
+      );
+    }
+    await run("DELETE FROM appointments WHERE id = ?", [id]);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
   return c.json({ ok: true }, 200);
 });
 
@@ -536,10 +789,16 @@ app.openapi(listClients, async (c) => {
   }
 
   const total = await get<{ count: number }>(`SELECT COUNT(*) as count FROM clients c ${where}`, params);
+  const today = todayIsoDate();
   const clients = await query<Record<string, unknown>>(
-    `SELECT c.*, (SELECT COUNT(*) FROM appointments WHERE client_id = c.id) as appointment_count
+    `SELECT c.*,
+      (SELECT COUNT(*) FROM appointments WHERE client_id = c.id) as appointment_count,
+      (
+        (SELECT COUNT(*) FROM appointments a WHERE a.client_id = c.id AND ${blockingClientAppointmentsWhere("a")})
+        + (SELECT COUNT(*) FROM booking_links bl WHERE bl.client_id = c.id AND ${blockingClientBookingLinksWhere("bl")})
+      ) as active_booking_count
      FROM clients c ${where} ORDER BY c.name ASC LIMIT ? OFFSET ?`,
-    [...params, limit, offset],
+    [...params, today, today, limit, offset],
   );
 
   return c.json({ clients, total: total?.count || 0 }, 200);
@@ -578,13 +837,15 @@ app.openapi(getClient, async (c) => {
   const { id } = c.req.valid("param");
   const client = await get<Record<string, unknown>>("SELECT * FROM clients WHERE id = ?", [id]);
   if (!client) return c.json({ error: "Not found" }, 404);
+  const today = todayIsoDate();
+  const active_booking_count = await countClientActiveBookings(id, today);
   const appointments = await query<Record<string, unknown>>(
     `SELECT a.*, s.name as staff_name, s.color as staff_color
      FROM appointments a LEFT JOIN staff s ON s.id = a.staff_id
      WHERE a.client_id = ? ORDER BY a.scheduled_date DESC LIMIT 50`,
     [id],
   );
-  return c.json({ client, appointments }, 200);
+  return c.json({ client: { ...client, active_booking_count }, appointments }, 200);
 });
 
 const createClient = createRoute({
@@ -595,6 +856,7 @@ const createClient = createRoute({
       name: z.string(),
       email: z.string().optional(),
       phone: z.string().optional(),
+      address: z.string().optional(),
       notes: z.string().optional(),
     }) } } },
   },
@@ -604,8 +866,8 @@ const createClient = createRoute({
 app.openapi(createClient, async (c) => {
   const body = c.req.valid("json");
   const result = await run(
-    "INSERT INTO clients (name, email, phone, notes) VALUES (?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.notes || ""],
+    "INSERT INTO clients (name, email, phone, address, notes) VALUES (?, ?, ?, ?, ?)",
+    [body.name, body.email || "", body.phone || "", body.address || "", body.notes || ""],
   );
   const client = await get<Record<string, unknown>>("SELECT * FROM clients WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ client }, 201);
@@ -620,6 +882,7 @@ const updateClient = createRoute({
       name: z.string().optional(),
       email: z.string().optional(),
       phone: z.string().optional(),
+      address: z.string().optional(),
       notes: z.string().optional(),
     }) } } },
   },
@@ -645,12 +908,34 @@ const deleteClient = createRoute({
   method: "delete",
   path: "/api/clients/{id}",
   request: { params: IdParam },
-  responses: { 200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } } },
+  responses: {
+    200: { description: "Deleted", content: { "application/json": { schema: OkSchema } } },
+    409: { description: "Client has active or upcoming bookings", content: { "application/json": { schema: ErrorSchema } } },
+  },
 });
 
 app.openapi(deleteClient, async (c) => {
   const { id } = c.req.valid("param");
-  await run("DELETE FROM clients WHERE id = ?", [id]);
+  const client = await get<{ id: number; name: string }>("SELECT id, name FROM clients WHERE id = ?", [id]);
+  if (!client) return c.json({ error: "Not found" }, 404);
+
+  const blockingCount = await countClientActiveBookings(id);
+  if (blockingCount > 0) {
+    return c.json(
+      { error: `${client.name} has active or upcoming bookings. Delete or cancel those appointments first.` },
+      409,
+    );
+  }
+
+  try {
+    await detachClientBookingLinks(id);
+    await run("DELETE FROM clients WHERE id = ?", [id]);
+  } catch {
+    return c.json(
+      { error: `${client.name} could not be deleted because related booking records still exist.` },
+      409,
+    );
+  }
   return c.json({ ok: true }, 200);
 });
 
@@ -774,6 +1059,7 @@ const listServices = createRoute({
 });
 
 app.openapi(listServices, async (c) => {
+  await backfillServiceSlugs();
   const services = await query<Record<string, unknown>>("SELECT * FROM services ORDER BY category ASC, name ASC");
   return c.json({ services }, 200);
 });
@@ -796,9 +1082,10 @@ const createService = createRoute({
 
 app.openapi(createService, async (c) => {
   const body = c.req.valid("json");
+  const slug = await uniqueServiceSlug(body.name);
   const result = await run(
-    "INSERT INTO services (name, description, duration, price, color, category) VALUES (?, ?, ?, ?, ?, ?)",
-    [body.name, body.description || "", body.duration || 60, body.price || 0, body.color || "#6b7280", body.category || ""],
+    "INSERT INTO services (name, slug, description, duration, price, color, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [body.name, slug, body.description || "", body.duration || 60, body.price || 0, body.color || "#6b7280", body.category || ""],
   );
   const service = await get<Record<string, unknown>>("SELECT * FROM services WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ service }, 201);
@@ -1009,4 +1296,14 @@ app.openapi(deleteProduct, async (c) => {
   return c.json({ ok: true }, 200);
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled: async (_event, env, ctx) => {
+    initDB(env);
+    ctx.waitUntil(
+      processAppointmentReminders(env as NotificationEnv).catch((err) =>
+        console.error("[reminders] scheduled run failed:", err),
+      ),
+    );
+  },
+};

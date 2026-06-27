@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "./status-badge";
+import { MobileNavTrigger } from "./mobile-nav-trigger";
+import { formatDateShort, formatTimeShort } from "@/lib/utils";
 
 export function ClientDetail() {
   const { selectedClient: client, selectedClientAppointments: appointments, navigate, updateClient, deleteClient } = useApp();
@@ -19,19 +21,28 @@ export function ClientDetail() {
 
   if (!client) return null;
 
+  const hasActiveBookings = (client.active_booking_count ?? 0) > 0;
+
   const handleSave = async () => {
     await updateClient(client.id, { name, email, phone, notes });
     setEditing(false);
   };
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex items-center gap-4">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/clients")}>
+    <div className="space-y-6 p-4 pb-8 md:p-6">
+      <div className="flex flex-wrap items-center gap-2">
+        <MobileNavTrigger />
+        <Button variant="ghost" size="sm" className="shrink-0" onClick={() => navigate("/clients")}>
           <ArrowLeft className="mr-1 h-4 w-4" /> Back
         </Button>
-        <h1 className="flex-1 text-2xl font-bold">{client.name}</h1>
-        <Button variant="destructive" size="sm" onClick={() => deleteClient(client.id)}>
+        <h1 className="min-w-0 flex-1 text-xl font-bold md:text-2xl">{client.name}</h1>
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={hasActiveBookings}
+          title={hasActiveBookings ? "Delete or cancel active bookings first" : undefined}
+          onClick={() => deleteClient(client.id)}
+        >
           <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
         </Button>
       </div>
@@ -96,8 +107,8 @@ export function ClientDetail() {
                 )}
                 {appointments.map((apt) => (
                   <TableRow key={apt.id} className="cursor-pointer" onClick={() => navigate(`/appointments/${apt.id}`)}>
-                    <TableCell className="text-xs">{apt.scheduled_date}</TableCell>
-                    <TableCell className="text-xs">{apt.start_time}</TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{formatDateShort(apt.scheduled_date)}</TableCell>
+                    <TableCell className="text-xs">{formatTimeShort(apt.start_time)}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-1.5">
                         {apt.staff_name && <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: apt.staff_color || "#7c3aed" }} />}

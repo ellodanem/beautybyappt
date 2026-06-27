@@ -5,16 +5,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CreateStaff } from "./create-staff";
+import { MobileNavTrigger } from "./mobile-nav-trigger";
 
 export function StaffList() {
   const { staffMembers, deleteStaff, updateStaff } = useApp();
   const [showCreate, setShowCreate] = useState(false);
 
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Staff</h1>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
+    <div className="space-y-4 p-4 pb-8 md:p-6">
+      <div className="flex items-center gap-2">
+        <MobileNavTrigger />
+        <h1 className="min-w-0 flex-1 text-xl font-bold tracking-tight md:text-2xl">Staff</h1>
+        <Button size="sm" className="shrink-0" onClick={() => setShowCreate(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" /> Add Staff
         </Button>
       </div>

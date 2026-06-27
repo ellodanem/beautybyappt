@@ -7,3 +7,6 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "open-salon-db"
 database_id = "local"
+
+[triggers]
+crons = ["0 * * * *"]

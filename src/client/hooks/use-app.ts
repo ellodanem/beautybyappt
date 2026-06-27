@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "preact/hooks";
 import { api } from "../api";
 import type {
   Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup,
+  ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo,
 } from "../types";
 import type { AppContextValue } from "../context";
 
@@ -44,7 +44,77 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [clientLookup, setClientLookup] = useState<ClientLookup[]>([]);
   const [staffLookup, setStaffLookup] = useState<StaffLookup[]>([]);
 
-  // ── Fetch helpers ──
+  const [defaultCurrency, setDefaultCurrency] = useState("USD");
+  const [currencyOptions, setCurrencyOptions] = useState<{ value: string; label: string }[]>([]);
+  const [branding, setBranding] = useState({ business_name: "", business_tagline: "", logo_url: "" });
+  const [offerings, setOfferings] = useState<OfferingSummary[]>([]);
+  const [calendarOfferingSlots, setCalendarOfferingSlots] = useState<OfferingSlotInstance[]>([]);
+  const [calendarEventDay, setCalendarEventDay] = useState<EventDayInfo>({
+    is_event_day: false,
+    block_regular_bookings: false,
+    event_names: [],
+  });
+  const [blockRegularOnEventDays, setBlockRegularOnEventDays] = useState(true);
+  const [stripeConfigured, setStripeConfigured] = useState(false);
+  const [stripeWebhookConfigured, setStripeWebhookConfigured] = useState(false);
+  const [stripePaymentsEnabled, setStripePaymentsEnabled] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState({
+    email_enabled: true,
+    sms_enabled: false,
+    whatsapp_enabled: false,
+    email_reply_to: "",
+    email_configured: false,
+    remind_24h_enabled: true,
+    remind_2h_enabled: true,
+  });
+  const [emailDomain, setEmailDomain] = useState({
+    resend_configured: false,
+    domain: "",
+    domain_id: "",
+    status: "",
+    from_address: "",
+    records: [] as { record: string; name: string; type: string; value: string; priority?: number; status?: string }[],
+    can_send_from_domain: false,
+  });
+
+  const fetchCurrencySettings = useCallback(async () => {
+    const data = await api<{ default_currency: string; supported: { value: string; label: string }[] }>(
+      "GET",
+      "/api/settings/currency",
+    );
+    setDefaultCurrency(data.default_currency);
+    setCurrencyOptions(data.supported);
+  }, []);
+
+  const fetchBranding = useCallback(async () => {
+    const data = await api<{ business_name: string; business_tagline: string; logo_url: string }>(
+      "GET",
+      "/api/settings/branding",
+    );
+    setBranding(data);
+  }, []);
+
+  const updateBranding = useCallback(async (data: {
+    business_name: string;
+    business_tagline?: string;
+    logo_url?: string | null;
+  }) => {
+    const res = await api<{ business_name: string; business_tagline: string; logo_url: string }>(
+      "PUT",
+      "/api/settings/branding",
+      data,
+    );
+    setBranding(res);
+  }, []);
+
+  const uploadBrandingLogo = useCallback(async (logoDataUrl: string) => {
+    const res = await api<{ business_name: string; business_tagline: string; logo_url: string }>(
+      "POST",
+      "/api/settings/branding/logo",
+      { logo_data_url: logoDataUrl },
+    );
+    setBranding(res);
+  }, []);
 
   const fetchStats = useCallback(async () => {
     const data = await api<Stats>("GET", "/api/stats");
@@ -61,10 +131,178 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, []);
 
   const fetchCalendar = useCallback(async (date: string) => {
-    const data = await api<{ appointments: Appointment[]; blocked_slots: BlockedSlot[] }>("GET", `/api/calendar?start=${date}&end=${date}`);
+    const data = await api<{
+      appointments: Appointment[];
+      blocked_slots: BlockedSlot[];
+      event_day: EventDayInfo;
+    }>("GET", `/api/calendar?start=${date}&end=${date}`);
     setCalendarAppointments(data.appointments);
     setCalendarBlocked(data.blocked_slots);
+    setCalendarEventDay(data.event_day ?? {
+      is_event_day: false,
+      block_regular_bookings: false,
+      event_names: [],
+    });
+    const slotsData = await api<{ slots: OfferingSlotInstance[] }>("GET", `/api/offerings/calendar?start=${date}&end=${date}`);
+    setCalendarOfferingSlots(slotsData.slots);
   }, []);
+
+  const fetchOfferings = useCallback(async () => {
+    const data = await api<{ offerings: OfferingSummary[] }>("GET", "/api/offerings");
+    setOfferings(data.offerings);
+  }, []);
+
+  const createOffering = useCallback(async (payload: Record<string, unknown>): Promise<number> => {
+    const res = await api<{ offering: { id: number } }>("POST", "/api/offerings", payload);
+    await fetchOfferings();
+    return res.offering.id;
+  }, [fetchOfferings]);
+
+  const updateOffering = useCallback(async (id: number, payload: Record<string, unknown>) => {
+    await api("PUT", `/api/offerings/${id}`, payload);
+    await fetchOfferings();
+  }, [fetchOfferings]);
+
+  const goLiveOffering = useCallback(async (id: number) => {
+    const res = await api<{ conflicts?: { id: number; identifier: string; scheduled_date: string; start_time: string; client_name: string }[] }>(
+      "POST",
+      `/api/offerings/${id}/go-live`,
+    );
+    await fetchOfferings();
+    await fetchCalendar(calendarDate);
+    return res.conflicts ?? [];
+  }, [fetchOfferings, fetchCalendar, calendarDate]);
+
+  const duplicateOffering = useCallback(async (id: number): Promise<number> => {
+    const res = await api<{ offering: { id: number } }>("POST", `/api/offerings/${id}/duplicate`);
+    await fetchOfferings();
+    return res.offering.id;
+  }, [fetchOfferings]);
+
+  const archiveOffering = useCallback(async (id: number) => {
+    await api("POST", `/api/offerings/${id}/archive`);
+    await fetchOfferings();
+    await fetchCalendar(calendarDate);
+  }, [fetchOfferings, fetchCalendar, calendarDate]);
+
+  const deleteOffering = useCallback(async (id: number) => {
+    await api("DELETE", `/api/offerings/${id}`);
+    await fetchOfferings();
+    await fetchCalendar(calendarDate);
+  }, [fetchOfferings, fetchCalendar, calendarDate]);
+
+  const fetchEventOverrideSettings = useCallback(async () => {
+    const data = await api<{ block_regular_on_event_days: boolean }>("GET", "/api/settings/event-override");
+    setBlockRegularOnEventDays(data.block_regular_on_event_days);
+  }, []);
+
+  const fetchStripeSettings = useCallback(async () => {
+    const data = await api<{
+      configured: boolean;
+      webhook_configured: boolean;
+      payments_enabled: boolean;
+    }>("GET", "/api/settings/stripe");
+    setStripeConfigured(data.configured);
+    setStripeWebhookConfigured(data.webhook_configured);
+    setStripePaymentsEnabled(data.payments_enabled);
+  }, []);
+
+  const updateStripePaymentsEnabled = useCallback(async (enabled: boolean) => {
+    const res = await api<{
+      configured: boolean;
+      webhook_configured: boolean;
+      payments_enabled: boolean;
+    }>("PUT", "/api/settings/stripe", { payments_enabled: enabled });
+    setStripeConfigured(res.configured);
+    setStripeWebhookConfigured(res.webhook_configured);
+    setStripePaymentsEnabled(res.payments_enabled);
+  }, []);
+
+  const fetchNotificationSettings = useCallback(async () => {
+    const data = await api<{
+      email_enabled: boolean;
+      sms_enabled: boolean;
+      whatsapp_enabled: boolean;
+      email_reply_to: string;
+      email_configured: boolean;
+      remind_24h_enabled: boolean;
+      remind_2h_enabled: boolean;
+    }>("GET", "/api/settings/notifications");
+    setNotificationSettings(data);
+  }, []);
+
+  const updateNotificationSettings = useCallback(async (data: {
+    email_enabled?: boolean;
+    sms_enabled?: boolean;
+    whatsapp_enabled?: boolean;
+    email_reply_to?: string;
+    remind_24h_enabled?: boolean;
+    remind_2h_enabled?: boolean;
+  }) => {
+    const res = await api<{
+      email_enabled: boolean;
+      sms_enabled: boolean;
+      whatsapp_enabled: boolean;
+      email_reply_to: string;
+      email_configured: boolean;
+      remind_24h_enabled: boolean;
+      remind_2h_enabled: boolean;
+    }>("PUT", "/api/settings/notifications", data);
+    setNotificationSettings(res);
+  }, []);
+
+  const fetchEmailDomain = useCallback(async () => {
+    const data = await api<{
+      resend_configured: boolean;
+      domain: string;
+      domain_id: string;
+      status: string;
+      from_address: string;
+      records: { record: string; name: string; type: string; value: string; priority?: number; status?: string }[];
+      can_send_from_domain: boolean;
+    }>("GET", "/api/settings/email-domain");
+    setEmailDomain(data);
+  }, []);
+
+  const connectEmailDomain = useCallback(async (domain: string) => {
+    const data = await api<typeof emailDomain>("POST", "/api/settings/email-domain", { domain });
+    setEmailDomain(data);
+  }, []);
+
+  const verifyEmailDomain = useCallback(async () => {
+    const data = await api<typeof emailDomain>("POST", "/api/settings/email-domain/verify");
+    setEmailDomain(data);
+  }, []);
+
+  const refreshEmailDomain = useCallback(async () => {
+    const data = await api<typeof emailDomain>("POST", "/api/settings/email-domain/refresh");
+    setEmailDomain(data);
+  }, []);
+
+  const setEmailFromAddress = useCallback(async (fromAddress: string) => {
+    const data = await api<typeof emailDomain>("PUT", "/api/settings/email-domain/from", { from_address: fromAddress });
+    setEmailDomain(data);
+  }, []);
+
+  const updateBlockRegularOnEventDays = useCallback(async (enabled: boolean) => {
+    const res = await api<{ block_regular_on_event_days: boolean }>(
+      "PUT",
+      "/api/settings/event-override",
+      { block_regular_on_event_days: enabled },
+    );
+    setBlockRegularOnEventDays(res.block_regular_on_event_days);
+  }, []);
+
+  const bookOfferingSlot = useCallback(async (slotId: number, data: {
+    client_id: number;
+    staff_id?: number | null;
+    addon_ids?: number[];
+    notes?: string;
+  }) => {
+    await api("POST", `/api/offerings/slots/${slotId}/book`, data);
+    await fetchCalendar(calendarDate);
+    await fetchStats();
+  }, [fetchCalendar, calendarDate, fetchStats]);
 
   const fetchClients = useCallback(async (pag: PaginatedState, search: string) => {
     const params = new URLSearchParams({ page: String(pag.page), limit: String(pag.limit) });
@@ -116,6 +354,13 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
           fetchServices(),
           fetchProducts(productsPag, ""),
           fetchLookups(),
+          fetchCurrencySettings(),
+          fetchBranding(),
+          fetchOfferings(),
+          fetchEventOverrideSettings(),
+          fetchStripeSettings(),
+          fetchNotificationSettings(),
+          fetchEmailDomain(),
         ]);
       } catch (err) {
         setError((err as Error).message);
@@ -147,12 +392,35 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const addAppointment = useCallback(async (data: {
     client_id: number; staff_id?: number | null; scheduled_date: string;
-    start_time?: string; notes?: string; is_recurring?: number; recurrence_interval?: string; service_ids?: number[];
+    start_time?: string; notes?: string; is_recurring?: number; recurrence_interval?: string;
+    service_ids?: number[]; travel_fee?: number; service_address?: string;
   }) => {
     await api("POST", "/api/appointments", data);
     await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
   }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
+
+  const createBookingLink = useCallback(async (data: {
+    staff_id: number;
+    scheduled_date: string;
+    start_time: string;
+    duration_minutes?: number;
+    total_price?: number;
+    deposit_amount?: number;
+    travel_fee?: number;
+    currency?: string;
+    notes?: string;
+    service_ids?: number[];
+  }): Promise<string> => {
+    const res = await api<{ booking_link: { token: string }; url_path: string }>("POST", "/api/booking-links", data);
+    await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
+    return `${window.location.origin}${res.url_path}`;
+  }, [calendarDate, fetchStats, fetchCalendar]);
+
+  const updateDefaultCurrency = useCallback(async (code: string) => {
+    const res = await api<{ default_currency: string }>("PUT", "/api/settings/currency", { default_currency: code });
+    setDefaultCurrency(res.default_currency);
+  }, []);
 
   const updateAppointment = useCallback(async (id: number, data: Partial<Appointment>) => {
     await api("PUT", `/api/appointments/${id}`, data);
@@ -164,11 +432,27 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
   }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
 
-  const deleteAppointment = useCallback(async (id: number) => {
-    await api("DELETE", `/api/appointments/${id}`);
-    if (selectedAppointment && selectedAppointment.id === id) { setSelectedAppointment(null); navigate("/appointments"); }
+  const updateAppointmentAddons = useCallback(async (id: number, addonIds: number[]) => {
+    await api("PUT", `/api/appointments/${id}/addons`, { addon_ids: addonIds });
     await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+    if (selectedAppointment && selectedAppointment.id === id) {
+      const res = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
+      setSelectedAppointment(res.appointment);
+    }
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
+
+  const deleteAppointment = useCallback(async (id: number) => {
+    if (!confirm("Delete this appointment? This cannot be undone.")) return;
+    try {
+      setError(null);
+      await api("DELETE", `/api/appointments/${id}`);
+      if (selectedAppointment && selectedAppointment.id === id) { setSelectedAppointment(null); navigate("/appointments"); }
+      await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+      await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, navigate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const selectAppointment = useCallback(async (id: number | null) => {
@@ -207,10 +491,11 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const setClientsPage = useCallback((page: number) => setClientsPag((p) => ({ ...p, page })), []);
 
-  const addClient = useCallback(async (data: Partial<Client>) => {
-    await api("POST", "/api/clients", data);
+  const addClient = useCallback(async (data: Partial<Client>): Promise<Client> => {
+    const res = await api<{ client: Client }>("POST", "/api/clients", data);
     await fetchClients(clientsPag, clientsSearch);
     await Promise.all([fetchStats(), fetchLookups()]);
+    return res.client;
   }, [clientsPag, clientsSearch, fetchClients, fetchStats, fetchLookups]);
 
   const updateClient = useCallback(async (id: number, data: Partial<Client>) => {
@@ -225,15 +510,27 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, [clientsPag, clientsSearch, selectedClient, fetchClients, fetchLookups]);
 
   const deleteClient = useCallback(async (id: number) => {
-    await api("DELETE", `/api/clients/${id}`);
-    if (selectedClient && selectedClient.id === id) {
-      setSelectedClient(null);
-      setSelectedClientAppointments([]);
-      navigate("/clients");
+    const client = selectedClient?.id === id ? selectedClient : clients.find((c) => c.id === id);
+    const label = client?.name || "This client";
+    if ((client?.active_booking_count ?? 0) > 0) {
+      setError(`${label} has active or upcoming bookings. Delete or cancel those appointments first.`);
+      return;
     }
-    await fetchClients(clientsPag, clientsSearch);
-    await Promise.all([fetchStats(), fetchLookups()]);
-  }, [clientsPag, clientsSearch, selectedClient, navigate, fetchClients, fetchStats, fetchLookups]);
+    if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+    try {
+      setError(null);
+      await api("DELETE", `/api/clients/${id}`);
+      if (selectedClient && selectedClient.id === id) {
+        setSelectedClient(null);
+        setSelectedClientAppointments([]);
+        navigate("/clients");
+      }
+      await fetchClients(clientsPag, clientsSearch);
+      await Promise.all([fetchStats(), fetchLookups()]);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }, [clients, clientsPag, clientsSearch, selectedClient, navigate, fetchClients, fetchStats, fetchLookups]);
 
   const selectClient = useCallback(async (id: number | null) => {
     if (id === null) { setSelectedClient(null); setSelectedClientAppointments([]); return; }
@@ -306,9 +603,9 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     navigate, isAgent, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
-    addAppointment, updateAppointment, deleteAppointment,
+    addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote,
-    calendarAppointments, calendarBlocked, calendarDate, setCalendarDate,
+    calendarAppointments, calendarBlocked, calendarEventDay, calendarDate, setCalendarDate,
     addBlockedSlot, deleteBlockedSlot,
     clients, clientsPag, setClientsPage, clientsSearch, setClientsSearch,
     addClient, updateClient, deleteClient,
@@ -318,6 +615,14 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     products, productsPag, setProductsPage, productsSearch, setProductsSearch,
     addProduct, updateProduct, deleteProduct,
     clientLookup, staffLookup,
+    defaultCurrency, currencyOptions, updateDefaultCurrency,
+    blockRegularOnEventDays, updateBlockRegularOnEventDays,
+    stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, updateStripePaymentsEnabled,
+    notificationSettings, updateNotificationSettings,
+    emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
+    branding, updateBranding, uploadBrandingLogo,
+    offerings, calendarOfferingSlots, fetchOfferings,
+    createOffering, updateOffering, goLiveOffering, duplicateOffering, archiveOffering, deleteOffering, bookOfferingSlot,
     loading, error, setError,
   };
 }

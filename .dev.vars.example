@@ -1,0 +1,20 @@
+# Copy to `.dev.vars` in the project root (never commit real keys).
+
+
+
+STRIPE_SECRET_KEY=sk_test_your_key_here
+
+STRIPE_WEBHOOK_SECRET=whsec_from_stripe_listen
+
+APP_URL=http://localhost:5173
+
+
+
+# Booking confirmation emails (Resend — https://resend.com)
+# Platform API key; each business verifies their own domain in Settings → Email domain
+RESEND_API_KEY=re_your_key_here
+# Fallback from address until domain is verified in Settings
+EMAIL_FROM=onboarding@resend.dev
+
+# Optional: protect POST /api/cron/reminders (hourly cron also runs automatically)
+CRON_SECRET=local-dev-cron-secret

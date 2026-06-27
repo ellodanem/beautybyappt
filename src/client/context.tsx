@@ -2,7 +2,7 @@ import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type {
   Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
-  ClientLookup, StaffLookup,
+  ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo, AppointmentConflict,
 } from "./types";
 
 export interface AppContextValue {
@@ -27,8 +27,92 @@ export interface AppContextValue {
     is_recurring?: number;
     recurrence_interval?: string;
     service_ids?: number[];
+    travel_fee?: number;
+    service_address?: string;
   }) => Promise<void>;
+  createBookingLink: (data: {
+    staff_id: number;
+    scheduled_date: string;
+    start_time: string;
+    duration_minutes?: number;
+    total_price?: number;
+    deposit_amount?: number;
+    travel_fee?: number;
+    currency?: string;
+    notes?: string;
+    service_ids?: number[];
+  }) => Promise<string>;
+
+  stripeConfigured: boolean;
+  stripeWebhookConfigured: boolean;
+  stripePaymentsEnabled: boolean;
+  updateStripePaymentsEnabled: (enabled: boolean) => Promise<void>;
+
+  notificationSettings: {
+    email_enabled: boolean;
+    sms_enabled: boolean;
+    whatsapp_enabled: boolean;
+    email_reply_to: string;
+    email_configured: boolean;
+    remind_24h_enabled: boolean;
+    remind_2h_enabled: boolean;
+  };
+  updateNotificationSettings: (data: {
+    email_enabled?: boolean;
+    sms_enabled?: boolean;
+    whatsapp_enabled?: boolean;
+    email_reply_to?: string;
+    remind_24h_enabled?: boolean;
+    remind_2h_enabled?: boolean;
+  }) => Promise<void>;
+
+  emailDomain: {
+    resend_configured: boolean;
+    domain: string;
+    domain_id: string;
+    status: string;
+    from_address: string;
+    records: { record: string; name: string; type: string; value: string; priority?: number; status?: string }[];
+    can_send_from_domain: boolean;
+  };
+  connectEmailDomain: (domain: string) => Promise<void>;
+  verifyEmailDomain: () => Promise<void>;
+  refreshEmailDomain: () => Promise<void>;
+  setEmailFromAddress: (fromAddress: string) => Promise<void>;
+
+  defaultCurrency: string;
+  currencyOptions: { value: string; label: string }[];
+  updateDefaultCurrency: (code: string) => Promise<void>;
+
+  blockRegularOnEventDays: boolean;
+  updateBlockRegularOnEventDays: (enabled: boolean) => Promise<void>;
+
+  branding: { business_name: string; business_tagline: string; logo_url: string };
+  updateBranding: (data: {
+    business_name: string;
+    business_tagline?: string;
+    logo_url?: string | null;
+  }) => Promise<void>;
+  uploadBrandingLogo: (logoDataUrl: string) => Promise<void>;
+
+  offerings: OfferingSummary[];
+  calendarOfferingSlots: OfferingSlotInstance[];
+  fetchOfferings: () => Promise<void>;
+  createOffering: (data: Record<string, unknown>) => Promise<number>;
+  updateOffering: (id: number, data: Record<string, unknown>) => Promise<void>;
+  goLiveOffering: (id: number) => Promise<AppointmentConflict[]>;
+  duplicateOffering: (id: number) => Promise<number>;
+  archiveOffering: (id: number) => Promise<void>;
+  deleteOffering: (id: number) => Promise<void>;
+  bookOfferingSlot: (slotId: number, data: {
+    client_id: number;
+    staff_id?: number | null;
+    addon_ids?: number[];
+    notes?: string;
+  }) => Promise<void>;
+
   updateAppointment: (id: number, data: Partial<Appointment>) => Promise<void>;
+  updateAppointmentAddons: (id: number, addonIds: number[]) => Promise<void>;
   deleteAppointment: (id: number) => Promise<void>;
 
   // Appointment detail
@@ -40,6 +124,7 @@ export interface AppContextValue {
   // Calendar
   calendarAppointments: Appointment[];
   calendarBlocked: BlockedSlot[];
+  calendarEventDay: EventDayInfo;
   calendarDate: string;
   setCalendarDate: (date: string) => void;
   addBlockedSlot: (data: { staff_id: number; blocked_date: string; start_time: string; end_time: string; reason?: string }) => Promise<void>;
@@ -51,7 +136,7 @@ export interface AppContextValue {
   setClientsPage: (page: number) => void;
   clientsSearch: string;
   setClientsSearch: (s: string) => void;
-  addClient: (data: Partial<Client>) => Promise<void>;
+  addClient: (data: Partial<Client>) => Promise<Client>;
   updateClient: (id: number, data: Partial<Client>) => Promise<void>;
   deleteClient: (id: number) => Promise<void>;
   selectedClient: Client | null;
@@ -87,6 +172,8 @@ export interface AppContextValue {
   loading: boolean;
   error: string | null;
   setError: (msg: string | null) => void;
+
+  openMobileMenu?: () => void;
 }
 
 export const AppContext = createContext<AppContextValue>(null!);

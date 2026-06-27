@@ -5,8 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import type { Client } from "../types";
 
-export function CreateClient({ onClose }: { onClose: () => void }) {
+export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCreated?: (client: Client) => void }) {
   const { addClient, setError } = useApp();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -18,7 +19,8 @@ export function CreateClient({ onClose }: { onClose: () => void }) {
     if (!name.trim()) { setError("Name is required"); return; }
     setSaving(true);
     try {
-      await addClient({ name: name.trim(), email, phone, notes });
+      const client = await addClient({ name: name.trim(), email, phone, notes });
+      onCreated?.(client);
       onClose();
     } catch (err) {
       setError((err as Error).message);

@@ -3,6 +3,7 @@ import { CalendarDays, Users, Clock, DollarSign, Package, AlertTriangle } from "
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatTimeShort } from "@/lib/utils";
 
 export function Dashboard() {
   const { stats, navigate, calendarAppointments } = useApp();
@@ -78,7 +79,7 @@ export function Dashboard() {
               <TableBody>
                 {todayAppointments.map((apt) => (
                   <TableRow key={apt.id} className="cursor-pointer" onClick={() => navigate(`/appointments/${apt.id}`)}>
-                    <TableCell className="font-medium">{apt.start_time}</TableCell>
+                    <TableCell className="font-medium">{formatTimeShort(apt.start_time)}</TableCell>
                     <TableCell>{apt.client_name}</TableCell>
                     <TableCell>
                       <span className="flex items-center gap-2">

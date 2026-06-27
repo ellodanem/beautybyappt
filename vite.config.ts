@@ -19,6 +19,9 @@ export default defineConfig({
     },
   },
   server: {
+    watch: {
+      ignored: ["**/.wrangler/**"],
+    },
     proxy: {
       "/api": {
         target: "http://localhost:8787",
