@@ -1,5 +1,6 @@
 import { get, query, run } from "./db.js";
 import { normalizePhone } from "./helpers.js";
+import { parseRequiredBookingEmail } from "../shared/email.js";
 
 export function todayIsoDate(): string {
   return new Date().toISOString().split("T")[0];
@@ -49,13 +50,22 @@ export async function detachClientBookingLinks(clientId: number): Promise<void> 
   await run("UPDATE booking_links SET client_id = NULL WHERE client_id = ?", [clientId]);
 }
 
+export async function assertClientEmailForBooking(clientId: number): Promise<void> {
+  const client = await get<{ email: string }>("SELECT email FROM clients WHERE id = ?", [clientId]);
+  if (!client) throw new Error("CLIENT_NOT_FOUND");
+  const parsed = parseRequiredBookingEmail(client.email);
+  if (!parsed.ok) throw new Error(parsed.error);
+}
+
 export async function findOrCreateClient(data: {
   name: string;
   phone: string;
-  email?: string;
+  email: string;
   address?: string;
 }): Promise<number> {
-  const email = (data.email || "").trim().toLowerCase();
+  const parsed = parseRequiredBookingEmail(data.email);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const email = parsed.email;
   const phoneNorm = normalizePhone(data.phone);
   const addressUpdate = data.address !== undefined ? data.address.trim() : null;
 

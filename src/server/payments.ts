@@ -2,6 +2,11 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { createRoute, z } from "@hono/zod-openapi";
 import { finalizeBookingLinkCheckout } from "./booking-link-payments.js";
 import { finalizeAppointmentPaymentCheckout } from "./appointment-payments.js";
+import {
+  finalizeOfferingBookingCheckout,
+  isBookingLinkCheckoutMetadata,
+  isOfferingCheckoutMetadata,
+} from "./offering-payments.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 import { runtimeEnv } from "./runtime-env.js";
 import {
@@ -30,6 +35,7 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
+      const metaType = session.metadata?.type;
       if (session.metadata?.type === "appointment_payment" && session.id) {
         try {
           const result = await finalizeAppointmentPaymentCheckout(env, session.id);
@@ -39,12 +45,23 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
         } catch (err) {
           console.error("Appointment payment webhook failed:", (err as Error).message);
         }
-      } else if (session.metadata?.type === "booking_link_deposit" && session.id) {
+      } else if (isBookingLinkCheckoutMetadata(metaType) && session.id) {
         try {
           const result = await finalizeBookingLinkCheckout(env, session.id);
-          scheduleBookingConfirmation(c, result.appointment_id, { receipt: true });
+          if (!result.already_done) {
+            scheduleBookingConfirmation(c, result.appointment_id!, { receipt: true });
+          }
         } catch (err) {
           console.error("Webhook finalize failed:", (err as Error).message);
+        }
+      } else if (isOfferingCheckoutMetadata(metaType) && session.id) {
+        try {
+          const result = await finalizeOfferingBookingCheckout(env, session.id);
+          if (!result.already_done) {
+            scheduleBookingConfirmation(c, result.appointment_id!, { receipt: true });
+          }
+        } catch (err) {
+          console.error("Offering checkout webhook failed:", (err as Error).message);
         }
       }
     }

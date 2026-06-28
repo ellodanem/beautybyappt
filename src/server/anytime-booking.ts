@@ -6,6 +6,7 @@ import { getDefaultCurrency } from "./settings.js";
 import { generateTimeSlots, timeToMinutes } from "../shared/offerings.js";
 import { assertRegularBookingAllowed } from "./event-override.js";
 import { findOrCreateClient } from "./clients.js";
+import { parseRequiredBookingEmail } from "../shared/email.js";
 import { backfillServiceSlugs, loadServiceAddons } from "./services.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 
@@ -300,7 +301,7 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
               start_time: z.string(),
               name: z.string(),
               phone: z.string(),
-              email: z.string().optional(),
+              email: z.string().trim().min(1).email(),
               address: z.string().optional(),
               notes: z.string().optional(),
               addon_ids: z.array(z.number().int()).optional(),
@@ -339,6 +340,8 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
     if (!body.name.trim() || !body.phone.trim()) {
       return c.json({ error: "Name and phone are required" }, 400);
     }
+    const emailCheck = parseRequiredBookingEmail(body.email);
+    if (!emailCheck.ok) return c.json({ error: emailCheck.error }, 400);
 
     await backfillServiceSlugs();
     const service = await get<ServiceRow>("SELECT * FROM services WHERE id = ? AND active = 1", [body.service_id]);
@@ -378,7 +381,7 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
     const clientId = await findOrCreateClient({
       name: body.name,
       phone: body.phone,
-      email: body.email,
+      email: emailCheck.email,
       address: body.address,
     });
 

@@ -16,6 +16,16 @@ import { cn } from "@/lib/utils";
 
 import { formatMoney } from "../shared/currency";
 
+import {
+  appointmentBalance,
+  offeringCheckoutAmount,
+  offeringClientHasPaymentChoice,
+  resolveOfferingDeposit,
+  type PaymentChoice,
+} from "../shared/payment";
+
+import { parseRequiredBookingEmail } from "../shared/email";
+
 import { DualCurrencyAmount } from "./components/dual-currency-amount";
 
 import { formatDateLong, formatTimeRange } from "@/lib/public-booking-utils";
@@ -113,6 +123,12 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
   const [submitting, setSubmitting] = useState(false);
 
+  const [stripeEnabled, setStripeEnabled] = useState(false);
+
+  const [paymentRequired, setPaymentRequired] = useState(false);
+
+  const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>("full");
+
   const publicPage = usePublicBranding();
 
   const publicBranding = publicPage?.branding ?? null;
@@ -159,6 +175,20 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
   useEffect(() => {
 
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("cancelled") === "1") {
+
+      setError("Payment was cancelled — your spot is not reserved yet. You can try again.");
+
+    }
+
+  }, []);
+
+
+
+  useEffect(() => {
+
     api<{
 
       offering: PublicOffering;
@@ -170,6 +200,10 @@ export function PublicOfferPage({ slug }: { slug: string }) {
       slots: PublicSlot[];
 
       addons: PublicAddon[];
+
+      stripe_enabled: boolean;
+
+      payment_required: boolean;
 
     }>("GET", `/api/offer/public/${encodeURIComponent(slug)}`)
 
@@ -184,6 +218,10 @@ export function PublicOfferPage({ slug }: { slug: string }) {
         setSlots(data.slots);
 
         setAddons(data.addons);
+
+        setStripeEnabled(data.stripe_enabled);
+
+        setPaymentRequired(data.payment_required);
 
         if (data.dates.length > 0) setSelectedDate(data.dates[0]);
 
@@ -278,6 +316,16 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
     }
 
+    const emailCheck = parseRequiredBookingEmail(email);
+
+    if (!emailCheck.ok) {
+
+      setError(emailCheck.error);
+
+      return;
+
+    }
+
     setSubmitting(true);
 
     setError(null);
@@ -286,7 +334,11 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
       const res = await api<{
 
-        appointment: {
+        requires_payment?: boolean;
+
+        checkout_url?: string;
+
+        appointment?: {
 
           identifier: string;
 
@@ -310,7 +362,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
         phone: phone.trim(),
 
-        email: email.trim(),
+        email: emailCheck.email,
 
         address: address.trim(),
 
@@ -318,9 +370,23 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
         notes: notes.trim(),
 
+        payment_choice: paymentChoice,
+
       });
 
-      setConfirmed(res.appointment);
+      if (res.requires_payment && res.checkout_url) {
+
+        window.location.href = res.checkout_url;
+
+        return;
+
+      }
+
+      if (res.appointment) {
+
+        setConfirmed(res.appointment);
+
+      }
 
     } catch (err) {
 
@@ -420,6 +486,30 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
 
 
+  const depositAmount = resolveOfferingDeposit(totalPrice);
+
+  const clientPaymentChoice = offeringClientHasPaymentChoice(totalPrice, depositAmount);
+
+  const checkoutTotal = offeringCheckoutAmount(totalPrice, depositAmount, paymentChoice);
+
+  const depositCheckoutTotal = offeringCheckoutAmount(totalPrice, depositAmount, "deposit");
+
+  const fullCheckoutTotal = offeringCheckoutAmount(totalPrice, depositAmount, "full");
+
+  const balanceDue = paymentChoice === "deposit"
+
+    ? appointmentBalance(totalPrice, checkoutTotal)
+
+    : 0;
+
+  const stripeCheckout = stripeEnabled && totalPrice > 0;
+
+  const submitLabel = stripeCheckout
+
+    ? (submitting ? "Redirecting…" : `Pay ${formatMoney(checkoutTotal, currency)}`)
+
+    : (submitting ? "Booking…" : "Book my spot");
+
   const openSlots = daySlots.filter((s) => !s.is_full);
 
   const summaryDate = selectedSlot?.slot_date ?? selectedDate;
@@ -431,7 +521,9 @@ export function PublicOfferPage({ slug }: { slug: string }) {
   );
 
   const summaryAction = detailsInView
-    ? { label: "Book my spot", formId: BOOKING_FORM_ID, loading: submitting }
+
+    ? { label: submitLabel, formId: BOOKING_FORM_ID, loading: submitting }
+
     : { label: "Continue", onClick: scrollToDetails, disabled: !selectedSlot };
 
   return (
@@ -746,6 +838,52 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                         </div>
 
+                        {totalPrice > 0 && clientPaymentChoice && (
+                          <div className="space-y-2 rounded-md border p-3">
+                            <p className="text-sm font-medium">Payment</p>
+                            <label className="flex cursor-pointer items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="payment_choice"
+                                checked={paymentChoice === "full"}
+                                onChange={() => setPaymentChoice("full")}
+                              />
+                              <span>
+                                <span className="font-medium">Pay in full</span>
+                                <span className="block text-muted-foreground">
+                                  {formatMoney(fullCheckoutTotal, currency)} now
+                                </span>
+                              </span>
+                            </label>
+                            <label className="flex cursor-pointer items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="payment_choice"
+                                checked={paymentChoice === "deposit"}
+                                onChange={() => setPaymentChoice("deposit")}
+                              />
+                              <span>
+                                <span className="font-medium">Pay deposit</span>
+                                <span className="block text-muted-foreground">
+                                  {formatMoney(depositCheckoutTotal, currency)} now
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        )}
+
+                        {totalPrice > 0 && balanceDue > 0 && paymentChoice === "deposit" && (
+                          <p className="text-sm text-muted-foreground">
+                            Balance at appointment: {formatMoney(balanceDue, currency)}
+                          </p>
+                        )}
+
+                        {totalPrice > 0 && !stripeEnabled && (
+                          <p className="text-sm text-amber-700">
+                            Online payment is not enabled — contact the business to complete your booking.
+                          </p>
+                        )}
+
                         {error && <p className="text-sm text-destructive">{error}</p>}
 
                       </form>
@@ -813,7 +951,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
                 className="h-11 shrink-0 px-6"
                 disabled={submitting}
               >
-                {submitting ? "Booking…" : "Book my spot"}
+                {submitLabel}
               </Button>
             ) : (
               <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>

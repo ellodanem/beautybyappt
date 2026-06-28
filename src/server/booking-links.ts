@@ -269,7 +269,7 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
             schema: z.object({
               name: z.string().min(1),
               phone: z.string().min(1),
-              email: z.string().optional(),
+              email: z.string().trim().min(1).email(),
               address: z.string().optional(),
               payment_choice: z.enum(["full", "deposit"]).optional(),
             }),

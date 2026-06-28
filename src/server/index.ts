@@ -15,7 +15,8 @@ import { backfillServiceSlugs, uniqueServiceSlug, syncServiceAddons, loadService
 import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
 import { derivePaymentStatus } from "../shared/payment.js";
 import { loadPendingPaymentSummary } from "./appointment-payments.js";
-import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate } from "./clients.js";
+import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate, assertClientEmailForBooking } from "./clients.js";
+import { parseRequiredBookingEmail } from "../shared/email.js";
 import { deleteStaffCascade } from "./staff.js";
 import { registerAuthRoutes, createAuthMiddleware } from "./auth.js";
 
@@ -726,6 +727,13 @@ app.openapi(createAppointment, async (c) => {
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }
+  try {
+    await assertClientEmailForBooking(body.client_id);
+  } catch (err) {
+    const msg = (err as Error).message;
+    if (msg === "CLIENT_NOT_FOUND") return c.json({ error: "Client not found" }, 400);
+    return c.json({ error: msg }, 400);
+  }
   const identifier = await nextIdentifier();
   const startTime = body.start_time || "09:00";
 
@@ -1021,7 +1029,7 @@ const createClient = createRoute({
   request: {
     body: { content: { "application/json": { schema: z.object({
       name: z.string(),
-      email: z.string().optional(),
+      email: z.string().trim().min(1).email(),
       phone: z.string().optional(),
       address: z.string().optional(),
       notes: z.string().optional(),
@@ -1032,9 +1040,11 @@ const createClient = createRoute({
 
 app.openapi(createClient, async (c) => {
   const body = c.req.valid("json");
+  const emailCheck = parseRequiredBookingEmail(body.email);
+  if (!emailCheck.ok) return c.json({ error: emailCheck.error }, 400);
   const result = await run(
     "INSERT INTO clients (name, email, phone, address, notes) VALUES (?, ?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.address || "", body.notes || ""],
+    [body.name, emailCheck.email, body.phone || "", body.address || "", body.notes || ""],
   );
   const client = await get<Record<string, unknown>>("SELECT * FROM clients WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ client }, 201);

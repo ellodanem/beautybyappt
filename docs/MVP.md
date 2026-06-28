@@ -494,10 +494,11 @@ Deposits and payments are referenced in Features A and B but need a single payme
 - Webhook confirms appointment + marks link paid
 - Success page at `/book/:token/success` (also works without webhook via session verify)
 
-### C2 — Deposits on offering bookings (B4)
+### C2 — Deposits on offering bookings (B4) ✅ *implemented locally*
 
-- Deposit required (or optional %) on public offering checkout
-- Capacity held pending payment; release slot on timeout
+- Deposit or full pay on public offering checkout (`/offer/:slug`)
+- Slot held for 15 minutes while checkout is open; pending holds count toward capacity
+- Success page at `/offer/:slug/success`
 
 ### C3 — Full payment & refunds
 
@@ -1019,6 +1020,7 @@ Client-facing UI     → business name + logo (H) on links, offerings, emails
 | Stripe / payments | None |
 | Email / reminders | None |
 | Google Calendar sync | None |
+| Offering Stripe checkout (C2) | ✅ Local |
 | Travel fee | None |
 | Business branding | Generic "Salon Manager" sidebar; no settings |
 | Client `address` | Not in schema |
@@ -1050,7 +1052,7 @@ Client-facing UI     → business name + logo (H) on links, offerings, emails
 7. ~~**D1** — Transactional email (confirmation + receipt)~~ ✅
 8. ~~**E1** — Email reminders (24h / 2h before)~~ ✅
 9. ~~**B2** — Public offering booking~~ ✅
-10. **C2** — Stripe on offering bookings (B4)
+10. ~~**C2** — Stripe on offering bookings (B4)~~ ✅
 11. **F1–F2** — Google Calendar connect + push sync
 12. **A3** — Auth and hardening
 13. **B3** — Year-over-year templates
@@ -1263,7 +1265,7 @@ Phase 3  → Evaluate native app only after real usage data
 | 2026-06-26 | Feature B added: seasonal bookable offerings (Carnival scenario), wizard, slots, capacity, add-ons, go-live calendar behavior. |
 | 2026-06-26 | Features C–G added: Stripe (unified), email, reminders, Google Calendar sync, optional travel fee. Build order updated. |
 | 2026-06-26 | Feature H added: logo and business name customization (staff app, public pages, email, Stripe). |
-| 2026-06-26 | Future considerations (I–O) + mobile strategy (web/PWA vs native app). |
+| 2026-06-28 | **C2 implemented:** Stripe deposit/full pay on public offering bookings, 15-min slot hold, success page. |
 | 2026-06-26 | **A1 implemented:** booking links API, public `/book/:token` page, calendar “Booking link” UI, Neon migrations folder. |
 | 2026-06-26 | **H1 implemented:** branding settings API, Settings UI, sidebar branding, public branding on `/book/:token`. Stripe: single test account for C1; Connect deferred to SaaS. |
 | 2026-06-26 | **C1 implemented:** Stripe deposit checkout on booking links, webhook, payment status on appointments, Settings Stripe status. |

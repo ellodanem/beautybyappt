@@ -69,6 +69,27 @@ export function linkRequiresPayment(link: { total_price: number }): boolean {
   return link.total_price > 0;
 }
 
+export function offeringRequiresPayment(total: number): boolean {
+  return total > 0;
+}
+
+export function resolveOfferingDeposit(total: number): number {
+  return computeDefaultDeposit(total);
+}
+
+export function offeringClientHasPaymentChoice(total: number, deposit: number): boolean {
+  return total > 0 && deposit < total - 0.009;
+}
+
+export function offeringCheckoutAmount(
+  total: number,
+  deposit: number,
+  choice: PaymentChoice,
+): number {
+  if (choice === "full") return total;
+  return deposit;
+}
+
 export function appointmentBalance(total: number, amountPaid: number): number {
   return Math.max(0, total - amountPaid);
 }

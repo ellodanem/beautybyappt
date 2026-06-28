@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import type { Client } from "../types";
+import { parseRequiredBookingEmail } from "../../shared/email";
 
 export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCreated?: (client: Client) => void }) {
   const { addClient, setError } = useApp();
@@ -17,9 +18,11 @@ export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCr
 
   const handleSubmit = async () => {
     if (!name.trim()) { setError("Name is required"); return; }
+    const emailCheck = parseRequiredBookingEmail(email);
+    if (!emailCheck.ok) { setError(emailCheck.error); return; }
     setSaving(true);
     try {
-      const client = await addClient({ name: name.trim(), email, phone, notes });
+      const client = await addClient({ name: name.trim(), email: emailCheck.email, phone, notes });
       onCreated?.(client);
       onClose();
     } catch (err) {
@@ -42,8 +45,8 @@ export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCr
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Email</Label>
-              <Input type="email" value={email} onChange={(e) => setEmail((e.target as HTMLInputElement).value)} placeholder="email@example.com" />
+              <Label>Email *</Label>
+              <Input type="email" required value={email} onChange={(e) => setEmail((e.target as HTMLInputElement).value)} placeholder="email@example.com" />
             </div>
             <div className="space-y-1.5">
               <Label>Phone</Label>

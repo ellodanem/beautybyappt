@@ -11,6 +11,7 @@ import {
   bookingLinkCheckoutAmount,
   type PaymentChoice,
 } from "../shared/payment";
+import { parseRequiredBookingEmail } from "../shared/email";
 import { BusinessHeader } from "./components/business-header";
 import { PublicPageShell } from "./components/public-page-shell";
 import { usePublicBranding } from "./hooks/use-public-branding";
@@ -107,6 +108,11 @@ export function PublicBookPage({ token }: { token: string }) {
       setError("Name and phone are required");
       return;
     }
+    const emailCheck = parseRequiredBookingEmail(email);
+    if (!emailCheck.ok) {
+      setError(emailCheck.error);
+      return;
+    }
     if (requiresAddress && !address.trim()) {
       setError("Address is required for on-location appointments");
       return;
@@ -127,7 +133,7 @@ export function PublicBookPage({ token }: { token: string }) {
       }>("POST", `/api/book/public/${token}/confirm`, {
         name: name.trim(),
         phone: phone.trim(),
-        email: email.trim(),
+        email: emailCheck.email,
         address: address.trim(),
         payment_choice: paymentChoice,
       });
@@ -291,7 +297,7 @@ export function PublicBookPage({ token }: { token: string }) {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email *</Label>
                 <Input
                   id="email"
                   type="email"
@@ -299,6 +305,7 @@ export function PublicBookPage({ token }: { token: string }) {
                   value={email}
                   onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
                   placeholder="you@example.com"
+                  required
                 />
               </div>
               <div className="space-y-1.5">

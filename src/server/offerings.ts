@@ -6,8 +6,27 @@ import { getDefaultCurrency } from "./settings.js";
 import { expandDateWindows, slugify } from "../shared/offerings.js";
 import { isValidCurrency } from "../shared/currency.js";
 import { findRegularAppointmentConflicts } from "./event-override.js";
-import { findOrCreateClient } from "./clients.js";
+import { assertClientEmailForBooking, findOrCreateClient } from "./clients.js";
+import { parseRequiredBookingEmail } from "../shared/email.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
+import { runtimeEnv } from "./runtime-env.js";
+import { isStripePaymentsActive } from "./stripe-payments-settings.js";
+import type { StripeEnv } from "./stripe.js";
+import {
+  computeOfferingBookingTotal,
+  countPendingOfferingCheckouts,
+  createOfferingBookingCheckout,
+  expireStaleOfferingCheckouts,
+  finalizeOfferingBookingCheckout,
+  offeringRequiresPayment,
+  offeringSlotSpotsLeft,
+} from "./offering-payments.js";
+import {
+  offeringCheckoutAmount,
+  offeringClientHasPaymentChoice,
+  resolveOfferingDeposit,
+  type PaymentChoice,
+} from "../shared/payment.js";
 
 const ErrorSchema = z.object({ error: z.string() });
 const IdParam = z.object({ id: z.string().openapi({ description: "Offering or slot ID" }) });
@@ -395,6 +414,13 @@ async function bookOfferingSlotInstance(
     addon_ids?: number[];
     notes?: string;
     via?: "staff" | "public";
+    payment?: {
+      deposit_amount: number;
+      amount_paid: number;
+      payment_status: string;
+      stripe_checkout_session_id?: string | null;
+      stripe_payment_intent_id?: string | null;
+    };
   },
 ): Promise<Record<string, unknown>> {
   const slot = await get<{
@@ -424,6 +450,7 @@ async function bookOfferingSlotInstance(
 
   const client = await get<{ id: number }>("SELECT id FROM clients WHERE id = ?", [opts.client_id]);
   if (!client) throw new Error("CLIENT_NOT_FOUND");
+  await assertClientEmailForBooking(opts.client_id);
 
   const addonIds = opts.addon_ids || [];
   let addonPrice = 0;
@@ -460,11 +487,17 @@ async function bookOfferingSlotInstance(
     : `${viaLabel}: ${slot.offering_name}`;
 
   const status = opts.via === "public" ? "confirmed" : "booked";
+  const depositAmount = opts.payment?.deposit_amount ?? 0;
+  const amountPaid = opts.payment?.amount_paid ?? 0;
+  const paymentStatus = opts.payment?.payment_status
+    ?? (totalPrice > 0 ? "unpaid" : "not_required");
   const result = await run(
     `INSERT INTO appointments (
       identifier, client_id, staff_id, scheduled_date, start_time, end_time,
-      total_price, currency, notes, offering_slot_instance_id, status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      total_price, currency, deposit_amount, amount_paid, payment_status,
+      stripe_checkout_session_id, stripe_payment_intent_id,
+      notes, offering_slot_instance_id, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       identifier,
       opts.client_id,
@@ -474,6 +507,11 @@ async function bookOfferingSlotInstance(
       endTime,
       totalPrice,
       appointmentCurrency,
+      depositAmount,
+      amountPaid,
+      paymentStatus,
+      opts.payment?.stripe_checkout_session_id ?? null,
+      opts.payment?.stripe_payment_intent_id ?? null,
       notes,
       slotId,
       status,
@@ -507,6 +545,8 @@ async function bookOfferingSlotInstance(
 
   return appointment!;
 }
+
+export { bookOfferingSlotInstance };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerOfferingRoutes(app: OpenAPIHono<any>) {
@@ -1055,6 +1095,9 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
       if (msg === "OFFERING_NOT_LIVE") return c.json({ error: "Offering is not live" }, 400);
       if (msg === "SLOT_FULL") return c.json({ error: "This slot is full" }, 400);
       if (msg === "CLIENT_NOT_FOUND") return c.json({ error: "Client not found" }, 400);
+      if (msg === "Email is required" || msg === "Enter a valid email address") {
+        return c.json({ error: msg }, 400);
+      }
       throw err;
     }
   });
@@ -1113,8 +1156,11 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
   app.openapi(getPublicOffering, async (c) => {
     const { slug } = c.req.valid("param");
+    const env = runtimeEnv(c.env) as StripeEnv;
     const offering = await get<OfferingRow>("SELECT * FROM offerings WHERE slug = ? AND status = 'live'", [slug]);
     if (!offering) return c.json({ error: "This event is not available" }, 404);
+
+    await expireStaleOfferingCheckouts();
 
     const today = new Date().toISOString().split("T")[0];
     const slots = await query<{
@@ -1144,6 +1190,20 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
     const dates = [...new Set(slots.map((s) => s.slot_date))].sort();
     const currency = offering.currency || await getDefaultCurrency();
+    const stripeEnabled = await isStripePaymentsActive(env);
+    const hasPaidOptions = offering.base_price > 0 || addons.some((a) => a.price > 0);
+    const paymentRequired = offeringRequiresPayment(hasPaidOptions ? 1 : 0);
+    const defaultDeposit = resolveOfferingDeposit(offering.base_price);
+
+    const slotsWithAvailability = await Promise.all(slots.map(async (slot) => {
+      const pending = await countPendingOfferingCheckouts(slot.id);
+      const spotsLeft = offeringSlotSpotsLeft(slot.capacity, slot.booked_count, pending);
+      return {
+        ...slot,
+        spots_left: spotsLeft,
+        is_full: spotsLeft <= 0,
+      };
+    }));
 
     return c.json({
       offering: {
@@ -1158,15 +1218,12 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
       },
       currency,
       dates,
-      slots: slots.map((slot) => {
-        const spotsLeft = slot.capacity - slot.booked_count;
-        return {
-          ...slot,
-          spots_left: spotsLeft,
-          is_full: spotsLeft <= 0,
-        };
-      }),
+      slots: slotsWithAvailability,
       addons,
+      stripe_enabled: stripeEnabled,
+      payment_required: paymentRequired,
+      deposit_amount: defaultDeposit,
+      client_payment_choice: offeringClientHasPaymentChoice(offering.base_price, defaultDeposit),
     }, 200);
   });
 
@@ -1182,21 +1239,27 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
               slot_instance_id: z.number().int(),
               name: z.string(),
               phone: z.string(),
-              email: z.string().optional(),
+              email: z.string().trim().min(1).email(),
               address: z.string().optional(),
               addon_ids: z.array(z.number().int()).optional(),
               notes: z.string().optional(),
+              payment_choice: z.enum(["full", "deposit"]).optional(),
             }),
           },
         },
       },
     },
     responses: {
-      201: {
-        description: "Booked",
+      200: {
+        description: "Checkout required or booked",
         content: {
           "application/json": {
             schema: z.object({
+              requires_payment: z.boolean().optional(),
+              checkout_url: z.string().optional(),
+              deposit_amount: z.number().optional(),
+              checkout_total: z.number().optional(),
+              payment_choice: z.enum(["full", "deposit"]).optional(),
               appointment: z.object({
                 identifier: z.string(),
                 scheduled_date: z.string(),
@@ -1205,7 +1268,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
                 total_price: z.number(),
                 currency: z.string(),
                 offering_name: z.string().optional(),
-              }),
+              }).optional(),
             }),
           },
         },
@@ -1219,15 +1282,21 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
   app.openapi(confirmPublicOffering, async (c) => {
     const { slug } = c.req.valid("param");
     const body = c.req.valid("json");
+    const env = runtimeEnv(c.env) as StripeEnv;
 
-    const offering = await get<{ id: number }>(
-      "SELECT id FROM offerings WHERE slug = ? AND status = 'live'",
+    const offering = await get<OfferingRow>(
+      "SELECT * FROM offerings WHERE slug = ? AND status = 'live'",
       [slug],
     );
     if (!offering) return c.json({ error: "This event is not available" }, 404);
 
-    const slot = await get<{ id: number; offering_id: number }>(
-      "SELECT id, offering_id FROM offering_slot_instances WHERE id = ?",
+    const slot = await get<{
+      id: number;
+      offering_id: number;
+      slot_date: string;
+      start_time: string;
+    }>(
+      "SELECT id, offering_id, slot_date, start_time FROM offering_slot_instances WHERE id = ?",
       [body.slot_instance_id],
     );
     if (!slot || slot.offering_id !== offering.id) {
@@ -1237,23 +1306,66 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     if (!body.name.trim() || !body.phone.trim()) {
       return c.json({ error: "Name and phone are required" }, 400);
     }
+    const emailCheck = parseRequiredBookingEmail(body.email);
+    if (!emailCheck.ok) return c.json({ error: emailCheck.error }, 400);
+
+    const addonIds = body.addon_ids ?? [];
+    const totalPrice = await computeOfferingBookingTotal(offering.id, offering.base_price, addonIds);
+    const depositAmount = resolveOfferingDeposit(totalPrice);
+    const paymentChoice: PaymentChoice = body.payment_choice === "deposit" ? "deposit" : "full";
+    const checkoutTotal = offeringCheckoutAmount(totalPrice, depositAmount, paymentChoice);
+    const needsPayment = offeringRequiresPayment(totalPrice) && await isStripePaymentsActive(env);
 
     const clientId = await findOrCreateClient({
       name: body.name,
       phone: body.phone,
-      email: body.email,
+      email: emailCheck.email,
       address: body.address,
     });
+
+    if (needsPayment) {
+      try {
+        const currency = offering.currency || await getDefaultCurrency();
+        const { checkout_url } = await createOfferingBookingCheckout(env, {
+          offeringId: offering.id,
+          offeringSlug: offering.slug,
+          offeringName: offering.name,
+          slotInstanceId: slot.id,
+          slotDate: slot.slot_date,
+          startTime: slot.start_time,
+          clientId,
+          addonIds,
+          notes: body.notes,
+          totalPrice,
+          currency,
+          paymentChoice,
+          requestUrl: c.req.url,
+          clientEmail: emailCheck.email,
+        });
+        return c.json({
+          requires_payment: true,
+          checkout_url,
+          deposit_amount: depositAmount,
+          checkout_total: checkoutTotal,
+          payment_choice: paymentChoice,
+        }, 200);
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg === "SLOT_FULL") return c.json({ error: "This time slot just filled up — pick another" }, 410);
+        return c.json({ error: msg }, 400);
+      }
+    }
 
     try {
       const appointment = await bookOfferingSlotInstance(body.slot_instance_id, {
         client_id: clientId,
-        addon_ids: body.addon_ids,
+        addon_ids: addonIds,
         notes: body.notes,
         via: "public",
       });
       scheduleBookingConfirmation(c, appointment.id as number);
       return c.json({
+        requires_payment: false,
         appointment: {
           identifier: appointment.identifier as string,
           scheduled_date: appointment.scheduled_date as string,
@@ -1263,13 +1375,90 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
           currency: appointment.currency as string,
           offering_name: appointment.offering_name as string | undefined,
         },
-      }, 201);
+      }, 200);
     } catch (err) {
       const msg = (err as Error).message;
       if (msg === "SLOT_FULL") return c.json({ error: "This time slot just filled up — pick another" }, 410);
       if (msg === "SLOT_NOT_FOUND") return c.json({ error: "Time slot not found" }, 404);
       if (msg === "OFFERING_NOT_LIVE") return c.json({ error: "This event is not available" }, 400);
       throw err;
+    }
+  });
+
+  const completePublicOffering = createRoute({
+    method: "get",
+    path: "/api/offer/public/{slug}/complete",
+    request: {
+      params: SlugParam,
+      query: z.object({ session_id: z.string() }),
+    },
+    responses: {
+      200: {
+        description: "Payment completed",
+        content: {
+          "application/json": {
+            schema: z.object({
+              appointment: z.object({
+                identifier: z.string(),
+                scheduled_date: z.string(),
+                start_time: z.string(),
+                end_time: z.string(),
+                total_price: z.number(),
+                deposit_amount: z.number(),
+                amount_paid: z.number(),
+                payment_status: z.string(),
+                currency: z.string(),
+                offering_name: z.string().optional(),
+              }),
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(completePublicOffering, async (c) => {
+    const { slug } = c.req.valid("param");
+    const { session_id: sessionId } = c.req.valid("query");
+    const env = runtimeEnv(c.env) as StripeEnv;
+
+    const offering = await get<{ id: number }>(
+      "SELECT id FROM offerings WHERE slug = ? AND status = 'live'",
+      [slug],
+    );
+    if (!offering) return c.json({ error: "This event is not available" }, 404);
+
+    try {
+      const result = await finalizeOfferingBookingCheckout(env, sessionId);
+      if (!result.already_done) {
+        scheduleBookingConfirmation(c, result.appointment_id!, { receipt: true });
+      }
+      const apt = await get<{
+        identifier: string;
+        scheduled_date: string;
+        start_time: string;
+        end_time: string;
+        total_price: number;
+        deposit_amount: number;
+        amount_paid: number;
+        payment_status: string;
+        currency: string;
+        offering_name: string;
+      }>(
+        `SELECT a.identifier, a.scheduled_date, a.start_time, a.end_time, a.total_price,
+                a.deposit_amount, a.amount_paid, a.payment_status, a.currency, o.name as offering_name
+         FROM appointments a
+         LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+         LEFT JOIN offerings o ON o.id = si.offering_id
+         WHERE a.id = ?`,
+        [result.appointment_id],
+      );
+      if (!apt) return c.json({ error: "Appointment not found" }, 404);
+      return c.json({ appointment: apt }, 200);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
     }
   });
 }

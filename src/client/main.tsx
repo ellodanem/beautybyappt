@@ -6,6 +6,7 @@ import { PublicPaySuccessPage } from "./public-pay-success";
 import { PublicPayCancelledPage } from "./public-pay-cancelled";
 import { PublicPayAppointmentPage } from "./public-pay-appointment";
 import { PublicOfferPage } from "./public-offer";
+import { PublicOfferSuccessPage } from "./public-offer-success";
 import { PublicAnytimePage } from "./public-anytime";
 import "./styles.css";
 
@@ -16,6 +17,7 @@ const anytimeServiceMatch = /^\/anytime\/([^/]+)\/?$/.exec(window.location.pathn
 const anytimeMatch = /^\/anytime\/?$/.exec(window.location.pathname);
 const bookSuccessMatch = /^\/book\/([^/]+)\/success\/?$/.exec(window.location.pathname);
 const bookMatch = /^\/book\/([^/]+)\/?$/.exec(window.location.pathname);
+const offerSuccessMatch = /^\/offer\/([^/]+)\/success\/?$/.exec(window.location.pathname);
 const offerMatch = /^\/offer\/([^/]+)\/?$/.exec(window.location.pathname);
 
 if (paySuccessMatch) {
@@ -32,6 +34,8 @@ if (paySuccessMatch) {
   render(<PublicBookSuccessPage token={bookSuccessMatch[1]} />, document.getElementById("app")!);
 } else if (bookMatch) {
   render(<PublicBookPage token={bookMatch[1]} />, document.getElementById("app")!);
+} else if (offerSuccessMatch) {
+  render(<PublicOfferSuccessPage slug={decodeURIComponent(offerSuccessMatch[1])} />, document.getElementById("app")!);
 } else if (offerMatch) {
   render(<PublicOfferPage slug={decodeURIComponent(offerMatch[1])} />, document.getElementById("app")!);
 } else {
