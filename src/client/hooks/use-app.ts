@@ -5,6 +5,7 @@ import type {
   ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo,
 } from "../types";
 import type { AppContextValue } from "../context";
+import { getCalendarRange, type CalendarViewMode } from "../lib/calendar-range";
 
 export function useAppState(isAgent: boolean, navigate: (to: string) => void): AppContextValue {
   const [stats, setStats] = useState<Stats>({ appointments: 0, clients: 0, staff: 0, services: 0, products: 0, today_appointments: 0, upcoming_appointments: 0, completed_appointments: 0, revenue: 0, low_stock_products: 0 });
@@ -21,6 +22,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   // Calendar
   const todayStr = new Date().toISOString().split("T")[0];
   const [calendarDate, setCalendarDate] = useState(todayStr);
+  const [calendarView, setCalendarView] = useState<CalendarViewMode>("day");
   const [calendarAppointments, setCalendarAppointments] = useState<Appointment[]>([]);
   const [calendarBlocked, setCalendarBlocked] = useState<BlockedSlot[]>([]);
 
@@ -177,22 +179,27 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     setAppointmentsPag((prev) => ({ ...prev, total: data.total }));
   }, []);
 
-  const fetchCalendar = useCallback(async (date: string) => {
+  const fetchCalendar = useCallback(async (date: string, view: CalendarViewMode = calendarView) => {
+    const { start, end } = getCalendarRange(date, view);
     const data = await api<{
       appointments: Appointment[];
       blocked_slots: BlockedSlot[];
       event_day: EventDayInfo;
-    }>("GET", `/api/calendar?start=${date}&end=${date}`);
+    }>("GET", `/api/calendar?start=${start}&end=${end}`);
     setCalendarAppointments(data.appointments);
     setCalendarBlocked(data.blocked_slots);
-    setCalendarEventDay(data.event_day ?? {
-      is_event_day: false,
-      block_regular_bookings: false,
-      event_names: [],
-    });
-    const slotsData = await api<{ slots: OfferingSlotInstance[] }>("GET", `/api/offerings/calendar?start=${date}&end=${date}`);
+    if (view === "day") {
+      setCalendarEventDay(data.event_day ?? {
+        is_event_day: false,
+        block_regular_bookings: false,
+        event_names: [],
+      });
+    } else {
+      setCalendarEventDay({ is_event_day: false, block_regular_bookings: false, event_names: [] });
+    }
+    const slotsData = await api<{ slots: OfferingSlotInstance[] }>("GET", `/api/offerings/calendar?start=${start}&end=${end}`);
     setCalendarOfferingSlots(slotsData.slots);
-  }, []);
+  }, [calendarView]);
 
   const fetchOfferings = useCallback(async () => {
     const data = await api<{ offerings: OfferingSummary[] }>("GET", "/api/offerings");
@@ -423,8 +430,8 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, [appointmentsPag.page, appointmentsSearch, appointmentsStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetchCalendar(calendarDate).catch((err) => setError((err as Error).message));
-  }, [calendarDate]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchCalendar(calendarDate, calendarView).catch((err) => setError((err as Error).message));
+  }, [calendarDate, calendarView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchClients(clientsPag, clientsSearch).catch((err) => setError((err as Error).message));
@@ -681,6 +688,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote, sendAppointmentPaymentLink,
     calendarAppointments, calendarBlocked, calendarEventDay, calendarDate, setCalendarDate,
+    calendarView, setCalendarView,
     addBlockedSlot, deleteBlockedSlot,
     clients, clientsPag, setClientsPage, clientsSearch, setClientsSearch,
     addClient, updateClient, deleteClient,

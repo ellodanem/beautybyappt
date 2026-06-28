@@ -14,7 +14,15 @@ import { CloseOutRowActions, useCloseOutClock } from "./close-out-row-actions";
 import { CalendarAppointmentBlock } from "./calendar-appointment-block";
 import { cn, formatTimeShort } from "@/lib/utils";
 import { needsCloseOut } from "../../shared/appointment-closeout";
+import {
+  formatViewLabel,
+  getMonthGrid,
+  getWeekDays,
+  type CalendarViewMode,
+} from "../lib/calendar-range";
 import type { Appointment, AppointmentStatus, BlockedSlot, OfferingSlotInstance, StaffLookup } from "../types";
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
@@ -143,6 +151,392 @@ function buildAgendaItems(
   }
 
   return items.sort((a, b) => a.sortKey - b.sortKey);
+}
+
+function CalendarViewToggle({
+  value,
+  onChange,
+  className,
+}: {
+  value: CalendarViewMode;
+  onChange: (view: CalendarViewMode) => void;
+  className?: string;
+}) {
+  const views: { id: CalendarViewMode; label: string }[] = [
+    { id: "day", label: "Day" },
+    { id: "week", label: "Week" },
+    { id: "month", label: "Month" },
+  ];
+  return (
+    <div className={cn("inline-flex items-center rounded-md bg-muted p-1", className)}>
+      {views.map((view) => (
+        <button
+          key={view.id}
+          type="button"
+          className={cn(
+            "rounded-sm px-3 py-1 text-sm font-medium transition-all",
+            value === view.id
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+          onClick={() => onChange(view.id)}
+        >
+          {view.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CalendarWeekGrid({
+  weekDays,
+  todayStr,
+  calendarDate,
+  appointments,
+  blocked,
+  offeringSlots,
+  hours,
+  dayStart,
+  totalMinutes,
+  hourHeight,
+  totalHeight,
+  now,
+  onOpenAppointment,
+  onOpenOfferingSlot,
+  onDeleteBlock,
+  onCloseOut,
+  onSelectDay,
+}: {
+  weekDays: string[];
+  todayStr: string;
+  calendarDate: string;
+  appointments: Appointment[];
+  blocked: BlockedSlot[];
+  offeringSlots: OfferingSlotInstance[];
+  hours: number[];
+  dayStart: number;
+  totalMinutes: number;
+  hourHeight: number;
+  totalHeight: number;
+  now: Date;
+  onOpenAppointment: (id: number) => void;
+  onOpenOfferingSlot: (slot: OfferingSlotInstance) => void;
+  onDeleteBlock: (id: number) => void;
+  onCloseOut: (id: number, status: AppointmentStatus) => Promise<void>;
+  onSelectDay: (date: string) => void;
+}) {
+  return (
+    <div className="flex flex-1 overflow-x-auto">
+      <div className="w-14 flex-shrink-0 border-r bg-muted/30 pt-10">
+        {hours.map((h) => (
+          <div key={h} className="flex items-start justify-end pr-2 text-xs text-muted-foreground" style={{ height: hourHeight }}>
+            {formatHour(h)}
+          </div>
+        ))}
+      </div>
+      {weekDays.map((day) => {
+        const dayAppts = appointments.filter((a) => a.scheduled_date === day);
+        const dayBlocked = blocked.filter((b) => b.blocked_date === day);
+        const daySlots = offeringSlots.filter((s) => s.slot_date === day);
+        const dayDate = new Date(day + "T00:00:00");
+        const apptLayout = layoutOverlappingTimedItems(
+          dayAppts.map((apt) => ({
+            id: apt.id,
+            startMin: timeToMinutes(apt.start_time) - dayStart,
+            endMin: timeToMinutes(apt.end_time) - dayStart,
+          })),
+        );
+        return (
+          <div key={day} className="flex min-w-[120px] flex-1 flex-col border-r last:border-r-0">
+            <button
+              type="button"
+              onClick={() => onSelectDay(day)}
+              className={cn(
+                "border-b px-2 py-2 text-center transition-colors hover:bg-muted/40",
+                day === todayStr && "bg-primary/5",
+                day === calendarDate && "ring-1 ring-inset ring-primary/30",
+              )}
+            >
+              <div className="text-[10px] font-medium uppercase text-muted-foreground">
+                {dayDate.toLocaleDateString("en-US", { weekday: "short" })}
+              </div>
+              <div className={cn(
+                "mx-auto mt-0.5 flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold",
+                day === todayStr && "bg-primary text-primary-foreground",
+              )}>
+                {dayDate.getDate()}
+              </div>
+            </button>
+            <div className="relative" style={{ height: totalHeight }}>
+              {hours.map((h) => (
+                <div
+                  key={h}
+                  className="absolute left-0 right-0 border-t border-dashed border-border/50"
+                  style={{ top: ((h * 60 - dayStart) / totalMinutes) * totalHeight }}
+                />
+              ))}
+              {dayBlocked.map((block) => {
+                const startMin = timeToMinutes(block.start_time) - dayStart;
+                const endMin = timeToMinutes(block.end_time) - dayStart;
+                const top = (startMin / totalMinutes) * totalHeight;
+                const height = ((endMin - startMin) / totalMinutes) * totalHeight;
+                return (
+                  <div
+                    key={`b-${block.id}`}
+                    className="absolute inset-x-0.5 z-10 flex items-center justify-between rounded bg-muted/60 px-1 text-[10px] text-muted-foreground"
+                    style={{ top, height: Math.max(height, 16) }}
+                  >
+                    <span className="truncate">{block.reason || "Blocked"}</span>
+                    <button
+                      className="flex-shrink-0 rounded p-0.5 hover:bg-muted"
+                      onClick={(e) => { e.stopPropagation(); onDeleteBlock(block.id); }}
+                    >
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </div>
+                );
+              })}
+              {daySlots.map((slot) => {
+                const startMin = timeToMinutes(slot.start_time) - dayStart;
+                const endMin = timeToMinutes(slot.end_time) - dayStart;
+                const top = (startMin / totalMinutes) * totalHeight;
+                const height = ((endMin - startMin) / totalMinutes) * totalHeight;
+                const full = slot.booked_count >= slot.capacity;
+                return (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    className={cn(
+                      "absolute inset-x-0.5 z-30 overflow-hidden rounded border-l-2 px-1 py-0.5 text-left text-[10px]",
+                      full && "opacity-60",
+                    )}
+                    style={{
+                      top,
+                      height: Math.max(height, 28),
+                      backgroundColor: `${slot.offering_color}18`,
+                      borderLeftColor: slot.offering_color,
+                    }}
+                    onClick={() => !full && onOpenOfferingSlot(slot)}
+                    disabled={full}
+                  >
+                    <div className="truncate font-medium">{slot.offering_name}</div>
+                    <div>{slot.booked_count}/{slot.capacity}</div>
+                  </button>
+                );
+              })}
+              {dayAppts.map((apt) => {
+                const startMin = timeToMinutes(apt.start_time) - dayStart;
+                const endMin = timeToMinutes(apt.end_time) - dayStart;
+                const top = (startMin / totalMinutes) * totalHeight;
+                const height = ((endMin - startMin) / totalMinutes) * totalHeight;
+                const position = apptLayout.get(apt.id);
+                return (
+                  <CalendarAppointmentBlock
+                    key={apt.id}
+                    apt={apt}
+                    now={now}
+                    top={top}
+                    height={height}
+                    column={position?.column}
+                    totalColumns={position?.totalColumns}
+                    borderColor={apt.staff_color || "#7c3aed"}
+                    backgroundColor={`${apt.staff_color || "#7c3aed"}14`}
+                    onOpen={() => onOpenAppointment(apt.id)}
+                    onCloseOut={(status) => onCloseOut(apt.id, status)}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CalendarMonthGrid({
+  calendarDate,
+  todayStr,
+  appointments,
+  offeringSlots,
+  onSelectDay,
+}: {
+  calendarDate: string;
+  todayStr: string;
+  appointments: Appointment[];
+  offeringSlots: OfferingSlotInstance[];
+  onSelectDay: (date: string) => void;
+}) {
+  const cells = useMemo(() => getMonthGrid(calendarDate), [calendarDate]);
+  const apptsByDate = useMemo(() => {
+    const map = new Map<string, Appointment[]>();
+    for (const apt of appointments) {
+      const list = map.get(apt.scheduled_date);
+      if (list) list.push(apt);
+      else map.set(apt.scheduled_date, [apt]);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
+    }
+    return map;
+  }, [appointments]);
+  const slotsByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const slot of offeringSlots) {
+      map.set(slot.slot_date, (map.get(slot.slot_date) ?? 0) + 1);
+    }
+    return map;
+  }, [offeringSlots]);
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="grid grid-cols-7 border-b bg-muted/20">
+        {WEEKDAY_LABELS.map((label) => (
+          <div key={label} className="py-2 text-center text-xs font-medium text-muted-foreground">
+            {label}
+          </div>
+        ))}
+      </div>
+      <div className="grid flex-1 auto-rows-fr grid-cols-7">
+        {cells.map((cell) => {
+          const dayAppts = apptsByDate.get(cell.date) ?? [];
+          const eventCount = slotsByDate.get(cell.date) ?? 0;
+          const dayDate = new Date(cell.date + "T00:00:00");
+          const isToday = cell.date === todayStr;
+          const isSelected = cell.date === calendarDate;
+          return (
+            <button
+              key={cell.date}
+              type="button"
+              onClick={() => onSelectDay(cell.date)}
+              className={cn(
+                "flex min-h-[88px] flex-col border-b border-r p-1.5 text-left transition-colors hover:bg-muted/30 md:min-h-[100px]",
+                !cell.inMonth && "bg-muted/10 text-muted-foreground",
+                isToday && cell.inMonth && "bg-primary/5",
+                isSelected && "ring-1 ring-inset ring-primary/40",
+              )}
+            >
+              <span className={cn(
+                "mb-1 inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold",
+                isToday && cell.inMonth && "bg-primary text-primary-foreground",
+              )}>
+                {dayDate.getDate()}
+              </span>
+              <div className="space-y-0.5 overflow-hidden">
+                {eventCount > 0 && (
+                  <div className="truncate rounded px-1 py-0.5 text-[10px] font-medium text-primary">
+                    {eventCount} event{eventCount !== 1 ? "s" : ""}
+                  </div>
+                )}
+                {dayAppts.slice(0, 3).map((apt) => (
+                  <div
+                    key={apt.id}
+                    className="truncate rounded px-1 py-0.5 text-[10px]"
+                    style={{
+                      backgroundColor: `${apt.staff_color || "#7c3aed"}18`,
+                      borderLeft: `2px solid ${apt.staff_color || "#7c3aed"}`,
+                    }}
+                  >
+                    <span className="text-muted-foreground">{formatTimeShort(apt.start_time)}</span>{" "}
+                    {apt.client_name}
+                  </div>
+                ))}
+                {dayAppts.length > 3 && (
+                  <div className="px-1 text-[10px] text-muted-foreground">
+                    +{dayAppts.length - 3} more
+                  </div>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CalendarMobileWeekAgenda({
+  weekDays,
+  todayStr,
+  appointments,
+  blocked,
+  offeringSlots,
+  staffLookup,
+  now,
+  onOpenAppointment,
+  onOpenOfferingSlot,
+  onDeleteBlock,
+  onCloseOut,
+  onSelectDay,
+}: {
+  weekDays: string[];
+  todayStr: string;
+  appointments: Appointment[];
+  blocked: BlockedSlot[];
+  offeringSlots: OfferingSlotInstance[];
+  staffLookup: StaffLookup[];
+  now: Date;
+  onOpenAppointment: (id: number) => void;
+  onOpenOfferingSlot: (slot: OfferingSlotInstance) => void;
+  onDeleteBlock: (id: number) => void;
+  onCloseOut: (id: number, status: AppointmentStatus) => Promise<void>;
+  onSelectDay: (date: string) => void;
+}) {
+  const hasAny = weekDays.some((day) =>
+    appointments.some((a) => a.scheduled_date === day)
+    || blocked.some((b) => b.blocked_date === day)
+    || offeringSlots.some((s) => s.slot_date === day),
+  );
+
+  if (!hasAny) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          Nothing scheduled this week
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {weekDays.map((day) => {
+        const dayAppts = appointments.filter((a) => a.scheduled_date === day);
+        const dayBlocked = blocked.filter((b) => b.blocked_date === day);
+        const daySlots = offeringSlots.filter((s) => s.slot_date === day);
+        if (dayAppts.length === 0 && dayBlocked.length === 0 && daySlots.length === 0) return null;
+        const dayDate = new Date(day + "T00:00:00");
+        const items = buildAgendaItems(dayAppts, dayBlocked, daySlots, staffLookup, "all");
+        return (
+          <div key={day}>
+            <button
+              type="button"
+              onClick={() => onSelectDay(day)}
+              className={cn(
+                "mb-2 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left",
+                day === todayStr && "text-primary",
+              )}
+            >
+              <span className="text-sm font-semibold">
+                {dayDate.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+              </span>
+              {day === todayStr && (
+                <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">Today</span>
+              )}
+            </button>
+            <CalendarMobileAgenda
+              items={items}
+              now={now}
+              onOpenAppointment={onOpenAppointment}
+              onOpenOfferingSlot={onOpenOfferingSlot}
+              onDeleteBlock={onDeleteBlock}
+              onCloseOut={onCloseOut}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function CalendarMobileAgenda({
@@ -288,7 +682,7 @@ function CalendarMobileAgenda({
 export function CalendarView() {
   const {
     calendarAppointments, calendarBlocked, calendarOfferingSlots, calendarEventDay,
-    calendarDate, setCalendarDate,
+    calendarDate, setCalendarDate, calendarView, setCalendarView,
     staffLookup, navigate, deleteBlockedSlot, addBlockedSlot, updateAppointment,
   } = useApp();
   const now = useCloseOutClock();
@@ -315,12 +709,23 @@ export function CalendarView() {
 
   const dateObj = new Date(calendarDate + "T00:00:00");
   const todayStr = new Date().toISOString().split("T")[0];
-  const mobileDateLabel = dateObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  const weekDays = useMemo(() => getWeekDays(calendarDate), [calendarDate]);
+  const viewLabel = formatViewLabel(calendarDate, calendarView);
+  const mobileDateLabel = calendarView === "day"
+    ? dateObj.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    : viewLabel;
 
-  const shiftDay = (delta: number) => {
+  const shiftPeriod = (delta: number) => {
     const d = new Date(calendarDate + "T00:00:00");
-    d.setDate(d.getDate() + delta);
+    if (calendarView === "day") d.setDate(d.getDate() + delta);
+    else if (calendarView === "week") d.setDate(d.getDate() + delta * 7);
+    else d.setMonth(d.getMonth() + delta);
     setCalendarDate(d.toISOString().split("T")[0]);
+  };
+
+  const selectDay = (date: string) => {
+    setCalendarDate(date);
+    setCalendarView("day");
   };
 
   const openDatePicker = () => {
@@ -338,6 +743,8 @@ export function CalendarView() {
   const totalMinutes = dayEnd - dayStart;
   const hourHeight = 64;
   const totalHeight = (totalMinutes / 60) * hourHeight;
+  const weekHourHeight = 48;
+  const weekTotalHeight = (totalMinutes / 60) * weekHourHeight;
 
   const handleAddBlock = async () => {
     if (!blockStaff) return;
@@ -377,7 +784,7 @@ export function CalendarView() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => shiftDay(-1)}>
+          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => shiftPeriod(-1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <button
@@ -388,13 +795,14 @@ export function CalendarView() {
             <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{mobileDateLabel}</span>
           </button>
-          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => shiftDay(1)}>
+          <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => shiftPeriod(1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" className="shrink-0" onClick={() => setCalendarDate(todayStr)}>
             Today
           </Button>
         </div>
+        <CalendarViewToggle value={calendarView} onChange={setCalendarView} className="w-full justify-center" />
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowBlockForm(!showBlockForm)}>
             <Ban className="mr-1 h-3.5 w-3.5" /> Block
@@ -403,7 +811,7 @@ export function CalendarView() {
             <Link2 className="mr-1 h-3.5 w-3.5" /> Link
           </Button>
         </div>
-        {(staffLookup.length > 1 || hasUnassigned) && (
+        {(calendarView === "day" && (staffLookup.length > 1 || hasUnassigned)) && (
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
               type="button"
@@ -453,13 +861,14 @@ export function CalendarView() {
 
       {/* Desktop header */}
       <div className="hidden items-center justify-between gap-2 md:flex">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-3">
           <MobileNavTrigger />
           <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
+          <CalendarViewToggle value={calendarView} onChange={setCalendarView} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setCalendarDate(todayStr)}>Today</Button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftDay(-1)}>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftPeriod(-1)}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <button
@@ -469,9 +878,9 @@ export function CalendarView() {
             className="flex min-w-[200px] items-center justify-center gap-1.5 rounded-md px-2 py-1 text-center text-sm font-semibold transition-colors hover:bg-muted"
           >
             <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-            {dateObj.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
+            {viewLabel}
           </button>
-          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftDay(1)}>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => shiftPeriod(1)}>
             <ChevronRight className="h-4 w-4" />
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowBlockForm(!showBlockForm)}>
@@ -486,7 +895,7 @@ export function CalendarView() {
         </div>
       </div>
 
-      {regularBlocked && calendarEventDay.event_names.length > 0 && (
+      {calendarView === "day" && regularBlocked && calendarEventDay.event_names.length > 0 && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="p-4 text-sm">
             <p className="font-semibold">{calendarEventDay.event_names.join(" · ")} day</p>
@@ -497,7 +906,7 @@ export function CalendarView() {
         </Card>
       )}
 
-      {hasEventSlots && !regularBlocked && (
+      {calendarView === "day" && hasEventSlots && !regularBlocked && (
         <Card className="border-primary/20 bg-muted/30">
           <CardContent className="p-4 text-sm text-muted-foreground">
             <strong className="text-foreground">Event day.</strong> Book clients with <strong>New Booking</strong> or the Event times column.
@@ -539,16 +948,82 @@ export function CalendarView() {
       {selectedSlot && <BookOfferingSlot slot={selectedSlot} onClose={() => setSelectedSlot(null)} />}
 
       <div className="md:hidden">
-        <CalendarMobileAgenda
-          items={agendaItems}
-          now={now}
-          onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
-          onOpenOfferingSlot={setSelectedSlot}
-          onDeleteBlock={deleteBlockedSlot}
-          onCloseOut={(id, status) => updateAppointment(id, { status })}
-        />
+        {calendarView === "day" && (
+          <CalendarMobileAgenda
+            items={agendaItems}
+            now={now}
+            onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
+            onOpenOfferingSlot={setSelectedSlot}
+            onDeleteBlock={deleteBlockedSlot}
+            onCloseOut={(id, status) => updateAppointment(id, { status })}
+          />
+        )}
+        {calendarView === "week" && (
+          <CalendarMobileWeekAgenda
+            weekDays={weekDays}
+            todayStr={todayStr}
+            appointments={calendarAppointments}
+            blocked={calendarBlocked}
+            offeringSlots={calendarOfferingSlots}
+            staffLookup={staffLookup}
+            now={now}
+            onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
+            onOpenOfferingSlot={setSelectedSlot}
+            onDeleteBlock={deleteBlockedSlot}
+            onCloseOut={(id, status) => updateAppointment(id, { status })}
+            onSelectDay={selectDay}
+          />
+        )}
+        {calendarView === "month" && (
+          <div className="overflow-hidden rounded-lg border bg-card">
+            <CalendarMonthGrid
+              calendarDate={calendarDate}
+              todayStr={todayStr}
+              appointments={calendarAppointments}
+              offeringSlots={calendarOfferingSlots}
+              onSelectDay={selectDay}
+            />
+          </div>
+        )}
       </div>
 
+      {calendarView === "week" && (
+        <div className="hidden flex-1 overflow-hidden rounded-lg border bg-card md:flex">
+          <CalendarWeekGrid
+            weekDays={weekDays}
+            todayStr={todayStr}
+            calendarDate={calendarDate}
+            appointments={calendarAppointments}
+            blocked={calendarBlocked}
+            offeringSlots={calendarOfferingSlots}
+            hours={HOURS}
+            dayStart={dayStart}
+            totalMinutes={totalMinutes}
+            hourHeight={weekHourHeight}
+            totalHeight={weekTotalHeight}
+            now={now}
+            onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
+            onOpenOfferingSlot={setSelectedSlot}
+            onDeleteBlock={deleteBlockedSlot}
+            onCloseOut={(id, status) => updateAppointment(id, { status })}
+            onSelectDay={selectDay}
+          />
+        </div>
+      )}
+
+      {calendarView === "month" && (
+        <div className="hidden flex-1 overflow-hidden rounded-lg border bg-card md:flex">
+          <CalendarMonthGrid
+            calendarDate={calendarDate}
+            todayStr={todayStr}
+            appointments={calendarAppointments}
+            offeringSlots={calendarOfferingSlots}
+            onSelectDay={selectDay}
+          />
+        </div>
+      )}
+
+      {calendarView === "day" && (
       <div className="hidden flex-1 overflow-x-auto rounded-lg border bg-card md:flex">
         {/* Time gutter */}
         <div className="w-16 flex-shrink-0 border-r bg-muted/30 pt-10">
@@ -731,6 +1206,7 @@ export function CalendarView() {
           })()}
         </div>
       </div>
+      )}
     </div>
   );
 }

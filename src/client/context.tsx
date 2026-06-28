@@ -4,6 +4,7 @@ import type {
   Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo, AppointmentConflict,
 } from "./types";
+import type { CalendarViewMode } from "./lib/calendar-range";
 
 export interface AppContextValue {
   navigate: (to: string) => void;
@@ -144,6 +145,8 @@ export interface AppContextValue {
   calendarEventDay: EventDayInfo;
   calendarDate: string;
   setCalendarDate: (date: string) => void;
+  calendarView: CalendarViewMode;
+  setCalendarView: (view: CalendarViewMode) => void;
   addBlockedSlot: (data: { staff_id: number; blocked_date: string; start_time: string; end_time: string; reason?: string }) => Promise<void>;
   deleteBlockedSlot: (id: number) => Promise<void>;
 
