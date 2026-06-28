@@ -676,48 +676,6 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
 
 
-              {selectedSlot && addons.length > 0 && (
-
-                <Card>
-
-                  <CardHeader className="pb-2">
-
-                    <CardTitle className="text-base">Add extras</CardTitle>
-
-                  </CardHeader>
-
-                  <CardContent className="space-y-2">
-
-                    {addons.map((addon) => (
-
-                      <label key={addon.id} className="flex cursor-pointer items-center gap-2 text-sm">
-
-                        <input
-
-                          type="checkbox"
-
-                          checked={selectedAddons.includes(addon.id)}
-
-                          onChange={() => toggleAddon(addon.id)}
-
-                        />
-
-                        <span className="flex-1">{addon.name}</span>
-
-                        <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
-
-                      </label>
-
-                    ))}
-
-                  </CardContent>
-
-                </Card>
-
-              )}
-
-
-
               {selectedSlot && (
 
                 <div ref={detailsRef} id="booking-details" className="scroll-mt-24">
@@ -869,6 +827,23 @@ export function PublicOfferPage({ slug }: { slug: string }) {
                                 </span>
                               </span>
                             </label>
+                          </div>
+                        )}
+
+                        {addons.length > 0 && (
+                          <div className="space-y-2 rounded-md border p-3">
+                            <p className="text-sm font-medium">Add extras</p>
+                            {addons.map((addon) => (
+                              <label key={addon.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedAddons.includes(addon.id)}
+                                  onChange={() => toggleAddon(addon.id)}
+                                />
+                                <span className="flex-1">{addon.name}</span>
+                                <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
+                              </label>
+                            ))}
                           </div>
                         )}
 
