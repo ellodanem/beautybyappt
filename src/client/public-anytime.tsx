@@ -29,7 +29,10 @@ import { PublicBookingSummary } from "./components/public-booking-summary";
 
 import { PublicTimeSlotPicker } from "./components/public-time-slot-picker";
 
+import { useDetailsInView } from "./hooks/use-details-in-view";
 import { usePublicBranding } from "./hooks/use-public-branding";
+
+const BOOKING_FORM_ID = "booking-form";
 
 
 
@@ -193,6 +196,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
     () => slots.find((slot) => slot.start_time === selectedStartTime) ?? null,
     [slots, selectedStartTime],
   );
+  const detailsInView = useDetailsInView(detailsRef, Boolean(selectedSlot));
 
   const serviceAddons = selectedService?.addons ?? [];
 
@@ -504,7 +508,9 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
     : "Pick a service, day, and time that works for you.";
 
-
+  const summaryAction = detailsInView
+    ? { label: "Book appointment", formId: BOOKING_FORM_ID, loading: submitting }
+    : { label: "Continue", onClick: scrollToDetails, disabled: !selectedSlot };
 
   return (
 
@@ -677,7 +683,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
                     <CardContent>
 
-                      <form className="space-y-4" onSubmit={handleSubmit}>
+                      <form id={BOOKING_FORM_ID} className="space-y-4" onSubmit={handleSubmit}>
 
                         <div className="space-y-1.5">
 
@@ -783,12 +789,6 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
                         {error && <p className="text-sm text-destructive">{error}</p>}
 
-                        <Button type="submit" className="h-12 w-full text-base" disabled={submitting}>
-
-                          {submitting ? "Booking…" : "Book appointment"}
-
-                        </Button>
-
                       </form>
 
                     </CardContent>
@@ -819,9 +819,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
               endTime={displayEndTime}
               price={formatMoney(bookingTotal, currency)}
 
-              continueDisabled={!selectedSlot}
-
-              onContinue={scrollToDetails}
+              action={summaryAction}
 
             />
 
@@ -847,11 +845,20 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
             </div>
 
-            <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>
-
-              Continue
-
-            </Button>
+            {detailsInView ? (
+              <Button
+                type="submit"
+                form={BOOKING_FORM_ID}
+                className="h-11 shrink-0 px-6"
+                disabled={submitting}
+              >
+                {submitting ? "Booking…" : "Book appointment"}
+              </Button>
+            ) : (
+              <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>
+                Continue
+              </Button>
+            )}
 
           </div>
 

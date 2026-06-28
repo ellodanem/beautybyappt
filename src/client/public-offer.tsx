@@ -30,7 +30,10 @@ import { PublicBookingSummary } from "./components/public-booking-summary";
 
 import { PublicTimeSlotPicker } from "./components/public-time-slot-picker";
 
+import { useDetailsInView } from "./hooks/use-details-in-view";
 import { usePublicBranding } from "./hooks/use-public-branding";
+
+const BOOKING_FORM_ID = "booking-form";
 
 
 
@@ -120,8 +123,6 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
   const detailsRef = useRef<HTMLDivElement>(null);
 
-
-
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
@@ -207,8 +208,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
 
   const selectedSlot = slots.find((s) => s.id === selectedSlotId) ?? null;
-
-
+  const detailsInView = useDetailsInView(detailsRef, Boolean(selectedSlot));
 
   const totalPrice = useMemo(() => {
 
@@ -430,7 +430,9 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
   );
 
-
+  const summaryAction = detailsInView
+    ? { label: "Book my spot", formId: BOOKING_FORM_ID, loading: submitting }
+    : { label: "Continue", onClick: scrollToDetails, disabled: !selectedSlot };
 
   return (
 
@@ -638,7 +640,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                     <CardContent>
 
-                      <form className="space-y-4" onSubmit={handleSubmit}>
+                      <form id={BOOKING_FORM_ID} className="space-y-4" onSubmit={handleSubmit}>
 
                         <div className="space-y-1.5">
 
@@ -698,6 +700,8 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
 
+                            placeholder="you@example.com"
+
                           />
 
                         </div>
@@ -744,12 +748,6 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                         {error && <p className="text-sm text-destructive">{error}</p>}
 
-                        <Button type="submit" className="h-12 w-full text-base" disabled={submitting}>
-
-                          {submitting ? "Booking…" : "Book my spot"}
-
-                        </Button>
-
                       </form>
 
                     </CardContent>
@@ -782,11 +780,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
               price={summaryPrice}
 
-              continueLabel="Continue"
-
-              continueDisabled={!selectedSlot}
-
-              onContinue={scrollToDetails}
+              action={summaryAction}
 
             />
 
@@ -812,11 +806,20 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
             </div>
 
-            <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>
-
-              Continue
-
-            </Button>
+            {detailsInView ? (
+              <Button
+                type="submit"
+                form={BOOKING_FORM_ID}
+                className="h-11 shrink-0 px-6"
+                disabled={submitting}
+              >
+                {submitting ? "Booking…" : "Book my spot"}
+              </Button>
+            ) : (
+              <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>
+                Continue
+              </Button>
+            )}
 
           </div>
 

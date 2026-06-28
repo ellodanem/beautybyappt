@@ -4,6 +4,15 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDateShort, formatDurationMinutes, formatTimeRange } from "@/lib/public-booking-utils";
 
+export interface PublicBookingSummaryAction {
+  label: string;
+  loadingLabel?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  formId?: string;
+  onClick?: () => void;
+}
+
 interface PublicBookingSummaryProps {
   serviceName: string;
   durationMinutes?: number;
@@ -12,9 +21,7 @@ interface PublicBookingSummaryProps {
   startTime?: string | null;
   endTime?: string | null;
   price: ComponentChildren;
-  continueLabel?: string;
-  continueDisabled?: boolean;
-  onContinue?: () => void;
+  action?: PublicBookingSummaryAction;
   className?: string;
 }
 
@@ -46,9 +53,7 @@ export function PublicBookingSummary({
   startTime,
   endTime,
   price,
-  continueLabel = "Continue",
-  continueDisabled,
-  onContinue,
+  action,
   className,
 }: PublicBookingSummaryProps) {
   const hasTime = Boolean(startTime && endTime);
@@ -96,14 +101,15 @@ export function PublicBookingSummary({
           <div className="text-xl font-bold text-primary">{price}</div>
         </SummaryRow>
 
-        {onContinue && (
+        {action && (
           <Button
-            type="button"
+            type={action.formId ? "submit" : "button"}
+            form={action.formId}
             className="mt-2 h-12 w-full text-base"
-            disabled={continueDisabled}
-            onClick={onContinue}
+            disabled={action.disabled || action.loading}
+            onClick={action.formId ? undefined : action.onClick}
           >
-            {continueLabel}
+            {action.loading ? (action.loadingLabel ?? "Booking…") : action.label}
           </Button>
         )}
       </div>
