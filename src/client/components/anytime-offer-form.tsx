@@ -4,6 +4,7 @@ import { api } from "../api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronLeft, Check, Plus, Trash2 } from "lucide-preact";
 import { formatMoney, getCurrency } from "../../shared/currency";
@@ -19,6 +20,7 @@ export function AnytimeOfferForm({ serviceId }: Props) {
   const existing = serviceId ? services.find((s) => s.id === serviceId) : null;
 
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [price, setPrice] = useState("75");
   const [duration, setDuration] = useState("60");
   const [allowAddons, setAllowAddons] = useState(false);
@@ -39,6 +41,7 @@ export function AnytimeOfferForm({ serviceId }: Props) {
   useEffect(() => {
     if (existing) {
       setName(existing.name);
+      setDescription(existing.description || "");
       setPrice(String(existing.price));
       setDuration(String(existing.duration));
       if (!serviceId) {
@@ -80,7 +83,7 @@ export function AnytimeOfferForm({ serviceId }: Props) {
         name: name.trim(),
         price: parseFloat(price) || 0,
         duration: parseInt(duration, 10) || 60,
-        description: existing?.description || "",
+        description: description.trim(),
         category: existing?.category || "General",
         color: existing?.color || pickUnusedServiceColor(services.filter((s) => s.active).map((s) => s.color)),
         active: 1,
@@ -134,6 +137,17 @@ export function AnytimeOfferForm({ serviceId }: Props) {
               onInput={(e) => setName((e.target as HTMLInputElement).value)}
               placeholder="Everyday glam"
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="svc-description">Description</Label>
+            <Textarea
+              id="svc-description"
+              rows={3}
+              value={description}
+              onInput={(e) => setDescription((e.target as HTMLTextAreaElement).value)}
+              placeholder="What's included? e.g. Full face glam with lashes"
+            />
+            <p className="text-xs text-muted-foreground">Optional — shown to clients on your booking page</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
