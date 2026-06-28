@@ -6,7 +6,7 @@ import { getDefaultCurrency } from "./settings.js";
 import { generateTimeSlots, timeToMinutes } from "../shared/offerings.js";
 import { assertRegularBookingAllowed } from "./event-override.js";
 import { findOrCreateClient } from "./clients.js";
-import { backfillServiceSlugs } from "./services.js";
+import { backfillServiceSlugs, loadServiceAddons } from "./services.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 
 const ErrorSchema = z.object({ error: z.string() });
@@ -25,7 +25,44 @@ type ServiceRow = {
   color: string;
   category: string;
   active: number;
+  allow_addons: number;
 };
+
+type PublicService = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  duration: number;
+  price: number;
+  color: string;
+  category: string;
+  allow_addons: number;
+  addons: { id: number; name: string; price: number; extra_duration: number }[];
+};
+
+async function toPublicService(service: ServiceRow): Promise<PublicService> {
+  const addons = service.allow_addons
+    ? await loadServiceAddons(service.id)
+    : [];
+  return {
+    id: service.id,
+    name: service.name,
+    slug: service.slug,
+    description: service.description,
+    duration: service.duration,
+    price: service.price,
+    color: service.color,
+    category: service.category,
+    allow_addons: service.allow_addons ?? 0,
+    addons: addons.map((a) => ({
+      id: a.id,
+      name: a.name,
+      price: a.price,
+      extra_duration: a.extra_duration,
+    })),
+  };
+}
 
 function rangesOverlap(start1: string, end1: string, start2: string, end2: string): boolean {
   const s1 = timeToMinutes(start1);
@@ -131,6 +168,13 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
     price: z.number(),
     color: z.string(),
     category: z.string(),
+    allow_addons: z.number().int(),
+    addons: z.array(z.object({
+      id: z.number().int(),
+      name: z.string(),
+      price: z.number(),
+      extra_duration: z.number().int(),
+    })),
   });
 
   const getPublicAnytime = createRoute({
@@ -153,7 +197,8 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(getPublicAnytime, async (c) => {
-    const services = await loadActiveServices();
+    const rows = await loadActiveServices();
+    const services = await Promise.all(rows.map((row) => toPublicService(row)));
     const currency = await getDefaultCurrency();
     return c.json({ services, currency, dates: upcomingDates() }, 200);
   });
@@ -239,7 +284,7 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
     const services = await loadActiveServices(slug);
     if (services.length === 0) return c.json({ error: "This service is not available" }, 404);
     const currency = await getDefaultCurrency();
-    return c.json({ service: services[0], currency, dates: upcomingDates() }, 200);
+    return c.json({ service: await toPublicService(services[0]), currency, dates: upcomingDates() }, 200);
   });
 
   const bookAnytime = createRoute({
@@ -258,6 +303,7 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
               email: z.string().optional(),
               address: z.string().optional(),
               notes: z.string().optional(),
+              addon_ids: z.array(z.number().int()).optional(),
             }),
           },
         },
@@ -301,6 +347,34 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
     const slot = await findBookableSlot(body.scheduled_date, service.duration, body.start_time);
     if (!slot) return c.json({ error: "That time is no longer available" }, 409);
 
+    const uniqueAddonIds = [...new Set(body.addon_ids ?? [])];
+    let addonPrice = 0;
+    let extraDuration = 0;
+    const selectedAddons: { id: number; price: number }[] = [];
+
+    if (uniqueAddonIds.length > 0) {
+      if (!service.allow_addons) {
+        return c.json({ error: "Extras are not available for this service" }, 400);
+      }
+      const addons = await query<{ id: number; price: number; extra_duration: number }>(
+        `SELECT id, price, extra_duration FROM service_addons
+         WHERE service_id = ? AND active = 1 AND id IN (${uniqueAddonIds.map(() => "?").join(",")})`,
+        [service.id, ...uniqueAddonIds],
+      );
+      if (addons.length !== uniqueAddonIds.length) {
+        return c.json({ error: "One or more extras are invalid for this service" }, 400);
+      }
+      for (const addon of addons) {
+        addonPrice += addon.price;
+        extraDuration += addon.extra_duration;
+        selectedAddons.push({ id: addon.id, price: addon.price });
+      }
+    }
+
+    const totalDuration = service.duration + extraDuration;
+    const endTime = addMinutes(slot.start_time, totalDuration);
+    const totalPrice = service.price + addonPrice;
+
     const clientId = await findOrCreateClient({
       name: body.name,
       phone: body.phone,
@@ -320,8 +394,8 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
         slot.staff_id,
         body.scheduled_date,
         slot.start_time,
-        slot.end_time,
-        service.price,
+        endTime,
+        totalPrice,
         currency,
         body.notes?.trim() || "",
       ],
@@ -333,6 +407,13 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
       [aptId, service.id, service.price, service.duration],
     );
 
+    for (const addon of selectedAddons) {
+      await run(
+        "INSERT INTO appointment_service_addons (appointment_id, service_addon_id, price) VALUES (?, ?, ?)",
+        [aptId, addon.id, addon.price],
+      );
+    }
+
     scheduleBookingConfirmation(c, aptId as number);
 
     return c.json({
@@ -340,8 +421,8 @@ export function registerAnytimeBookingRoutes(app: OpenAPIHono<any>) {
         identifier,
         scheduled_date: body.scheduled_date,
         start_time: slot.start_time,
-        end_time: slot.end_time,
-        total_price: service.price,
+        end_time: endTime,
+        total_price: totalPrice,
         currency,
         service_name: service.name,
       },

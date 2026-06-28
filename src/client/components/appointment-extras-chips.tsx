@@ -3,7 +3,9 @@ import { formatMoney } from "../../shared/currency";
 import type { Appointment } from "../types";
 
 export function AppointmentExtrasChips({ appointment }: { appointment: Appointment }) {
-  const addons = appointment.appointment_offering_addons ?? [];
+  const offeringAddons = appointment.appointment_offering_addons ?? [];
+  const serviceAddons = appointment.appointment_service_addons ?? [];
+  const addons = offeringAddons.length > 0 ? offeringAddons : serviceAddons;
   if (addons.length === 0) return null;
 
   const currency = appointment.currency || "USD";

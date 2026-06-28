@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 import { formatMoney } from "../shared/currency";
+import { addMinutes } from "../shared/offerings";
 
 import { formatDateLong, formatTimeRange } from "@/lib/public-booking-utils";
 
@@ -32,24 +33,24 @@ import { usePublicBranding } from "./hooks/use-public-branding";
 
 
 
-interface PublicService {
-
+interface PublicServiceAddon {
   id: number;
-
   name: string;
-
-  slug: string;
-
-  description: string;
-
-  duration: number;
-
   price: number;
+  extra_duration: number;
+}
 
+interface PublicService {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  duration: number;
+  price: number;
   color: string;
-
   category: string;
-
+  allow_addons: number;
+  addons: PublicServiceAddon[];
 }
 
 
@@ -117,6 +118,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
   const [address, setAddress] = useState("");
 
   const [notes, setNotes] = useState("");
+  const [selectedAddonIds, setSelectedAddonIds] = useState<number[]>([]);
 
   const [confirmed, setConfirmed] = useState<{
 
@@ -183,22 +185,36 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
 
   const selectedService = useMemo(
-
     () => services.find((svc) => svc.id === selectedServiceId) ?? null,
-
     [services, selectedServiceId],
-
   );
-
-
 
   const selectedSlot = useMemo(
-
     () => slots.find((slot) => slot.start_time === selectedStartTime) ?? null,
-
     [slots, selectedStartTime],
-
   );
+
+  const serviceAddons = selectedService?.addons ?? [];
+
+  const extrasSubtotal = useMemo(
+    () => serviceAddons
+      .filter((addon) => selectedAddonIds.includes(addon.id))
+      .reduce((sum, addon) => sum + addon.price, 0),
+    [serviceAddons, selectedAddonIds],
+  );
+
+  const extraDuration = useMemo(
+    () => serviceAddons
+      .filter((addon) => selectedAddonIds.includes(addon.id))
+      .reduce((sum, addon) => sum + addon.extra_duration, 0),
+    [serviceAddons, selectedAddonIds],
+  );
+
+  const bookingTotal = (selectedService?.price ?? 0) + extrasSubtotal;
+
+  const displayEndTime = selectedSlot && selectedService
+    ? addMinutes(selectedSlot.start_time, selectedService.duration + extraDuration)
+    : selectedSlot?.end_time ?? null;
 
 
 
@@ -259,13 +275,16 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
 
   const handleServiceChange = (serviceId: number) => {
-
     setSelectedServiceId(serviceId);
-
     setSelectedStartTime(null);
-
+    setSelectedAddonIds([]);
     setError(null);
+  };
 
+  const toggleAddon = (addonId: number) => {
+    setSelectedAddonIds((prev) => (
+      prev.includes(addonId) ? prev.filter((id) => id !== addonId) : [...prev, addonId]
+    ));
   };
 
 
@@ -353,6 +372,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
         address: address.trim(),
 
         notes: notes.trim(),
+        addon_ids: selectedAddonIds,
 
       });
 
@@ -622,7 +642,26 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
               />
 
-
+              {selectedSlot && serviceAddons.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base">Add extras</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {serviceAddons.map((addon) => (
+                      <label key={addon.id} className="flex cursor-pointer items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedAddonIds.includes(addon.id)}
+                          onChange={() => toggleAddon(addon.id)}
+                        />
+                        <span className="flex-1">{addon.name}</span>
+                        <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
+                      </label>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
 
               {selectedSlot && (
 
@@ -777,10 +816,8 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
               date={selectedDate}
 
               startTime={selectedSlot?.start_time ?? null}
-
-              endTime={selectedSlot?.end_time ?? null}
-
-              price={formatMoney(selectedService.price, currency)}
+              endTime={displayEndTime}
+              price={formatMoney(bookingTotal, currency)}
 
               continueDisabled={!selectedSlot}
 
@@ -806,7 +843,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
               <p className="truncate text-sm font-medium">{selectedService.name}</p>
 
-              <p className="text-sm font-bold text-primary">{formatMoney(selectedService.price, currency)}</p>
+              <p className="text-sm font-bold text-primary">{formatMoney(bookingTotal, currency)}</p>
 
             </div>
 

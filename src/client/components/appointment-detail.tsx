@@ -13,7 +13,7 @@ import { CloseOutBanner } from "./close-out-banner";
 import { formatDateShort, formatTimeShort } from "@/lib/utils";
 import { formatMoney } from "../../shared/currency";
 import { appointmentBalance, computeDefaultDeposit } from "../../shared/payment";
-import type { Appointment, OfferingAddon } from "../types";
+import type { Appointment, OfferingAddon, ServiceAddon } from "../types";
 
 function parseAmount(value: string): number {
   if (value.trim() === "") return 0;
@@ -28,12 +28,20 @@ function getEffectiveTotal(
   extrasDirty: boolean,
   offeringAddons: OfferingAddon[],
   offeringBasePrice: number,
+  serviceAddons: ServiceAddon[],
+  serviceBasePrice: number,
 ): number {
   if (apt.offering_id && extrasDirty) {
     const extrasSubtotal = offeringAddons
       .filter((addon) => addon.id != null && selectedAddonIds.includes(addon.id))
       .reduce((sum, addon) => sum + addon.price, 0);
     return offeringBasePrice + extrasSubtotal + (apt.travel_fee ?? 0);
+  }
+  if (!apt.offering_id && serviceAddons.length > 0 && extrasDirty) {
+    const extrasSubtotal = serviceAddons
+      .filter((addon) => addon.id != null && selectedAddonIds.includes(addon.id))
+      .reduce((sum, addon) => sum + addon.price, 0);
+    return serviceBasePrice + extrasSubtotal + (apt.travel_fee ?? 0);
   }
   return parseAmount(totalPrice);
 }
@@ -79,19 +87,30 @@ export function AppointmentDetail() {
     setPaymentSaved(false);
     setPaymentLinkCopied(false);
     setLastPaymentLinkUrl(null);
-    setSelectedAddonIds((apt.appointment_offering_addons ?? []).map((a) => a.offering_addon_id));
+    setSelectedAddonIds(
+      apt.offering_id
+        ? (apt.appointment_offering_addons ?? []).map((a) => a.offering_addon_id)
+        : (apt.appointment_service_addons ?? []).map((a) => a.service_addon_id),
+    );
     setExtrasSaved(false);
-  }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons]);
+  }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons, apt?.appointment_service_addons, apt?.offering_id]);
 
   const offeringAddons = apt?.offering_addons ?? [];
+  const serviceAddons = apt?.service_addons ?? [];
   const offeringBasePrice = apt?.offering_base_price ?? 0;
-  const assignedAddonIds = (apt?.appointment_offering_addons ?? []).map((a) => a.offering_addon_id);
+  const serviceBasePrice = apt?.appointment_services?.[0]?.price ?? 0;
+  const assignedAddonIds = apt?.offering_id
+    ? (apt?.appointment_offering_addons ?? []).map((a) => a.offering_addon_id)
+    : (apt?.appointment_service_addons ?? []).map((a) => a.service_addon_id);
+  const activeAddons = apt?.offering_id ? offeringAddons : serviceAddons;
+  const activeBasePrice = apt?.offering_id ? offeringBasePrice : serviceBasePrice;
+  const hasExtras = activeAddons.length > 0;
   const extrasDirty = apt
     ? selectedAddonIds.length !== assignedAddonIds.length
       || selectedAddonIds.some((id) => !assignedAddonIds.includes(id))
     : false;
   const effectiveTotal = apt
-    ? getEffectiveTotal(apt, totalPrice, selectedAddonIds, extrasDirty, offeringAddons, offeringBasePrice)
+    ? getEffectiveTotal(apt, totalPrice, selectedAddonIds, extrasDirty, offeringAddons, offeringBasePrice, serviceAddons, serviceBasePrice)
     : 0;
   const autoDeposit = computeDefaultDeposit(effectiveTotal);
 
@@ -135,10 +154,10 @@ export function AppointmentDetail() {
           ? "Fully paid"
           : null;
 
-  const extrasSubtotal = offeringAddons
+  const extrasSubtotal = activeAddons
     .filter((addon) => addon.id != null && selectedAddonIds.includes(addon.id))
     .reduce((sum, addon) => sum + addon.price, 0);
-  const serviceTotal = offeringBasePrice + extrasSubtotal + (apt.travel_fee ?? 0);
+  const serviceTotal = activeBasePrice + extrasSubtotal + (apt.travel_fee ?? 0);
 
   const toggleAddon = (addonId: number) => {
     setSelectedAddonIds((prev) => (
@@ -533,7 +552,7 @@ export function AppointmentDetail() {
               ) : (!apt.appointment_services || apt.appointment_services.length === 0) ? (
                 <p className="text-sm text-muted-foreground">No services added</p>
               ) : (
-                <div className="space-y-2">
+                <>
                   {apt.appointment_services.map((svc) => (
                     <div key={svc.id} className="flex items-center justify-between text-sm">
                       <span>{svc.service_name || `Service #${svc.service_id}`}</span>
@@ -543,7 +562,49 @@ export function AppointmentDetail() {
                       </div>
                     </div>
                   ))}
-                </div>
+                  {hasExtras && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Extras</p>
+                      {serviceAddons.map((addon) => (
+                        <label
+                          key={addon.id}
+                          className="flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={addon.id != null && selectedAddonIds.includes(addon.id)}
+                            onChange={() => addon.id != null && toggleAddon(addon.id)}
+                          />
+                          <span className="flex-1">{addon.name}</span>
+                          <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {hasExtras && (
+                    <>
+                      <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Service total</span>
+                          <span className="font-semibold">{formatMoney(extrasDirty ? serviceTotal : apt.total_price, currency)}</span>
+                        </div>
+                        {(apt.travel_fee ?? 0) > 0 && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Includes {formatMoney(apt.travel_fee ?? 0, currency)} travel fee
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button size="sm" disabled={!extrasDirty || extrasSaving} onClick={handleSaveExtras}>
+                          {extrasSaving ? "Saving…" : "Save extras"}
+                        </Button>
+                        {extrasSaved && !extrasDirty && (
+                          <span className="text-sm text-emerald-600">Saved</span>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

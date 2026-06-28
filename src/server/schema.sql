@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS services (
   color TEXT NOT NULL DEFAULT '#6b7280',
   category TEXT DEFAULT '',
   active INTEGER NOT NULL DEFAULT 1,
+  allow_addons INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -343,11 +344,29 @@ CREATE TABLE IF NOT EXISTS appointment_offering_addons (
   price REAL NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS service_addons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  price REAL NOT NULL DEFAULT 0,
+  extra_duration INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS appointment_service_addons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+  service_addon_id INTEGER NOT NULL REFERENCES service_addons(id),
+  price REAL NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_offerings_status ON offerings(status);
 CREATE INDEX IF NOT EXISTS idx_offering_date_windows_offering ON offering_date_windows(offering_id);
 CREATE INDEX IF NOT EXISTS idx_offering_slot_instances_date ON offering_slot_instances(slot_date);
 
 CREATE INDEX IF NOT EXISTS idx_appointments_offering_slot ON appointments(offering_slot_instance_id);
+CREATE INDEX IF NOT EXISTS idx_service_addons_service ON service_addons(service_id);
+CREATE INDEX IF NOT EXISTS idx_appointment_service_addons_appointment ON appointment_service_addons(appointment_id);
 
 -- One-time for DBs created before B1 (skip if column already exists):
 -- ALTER TABLE appointments ADD COLUMN offering_slot_instance_id INTEGER REFERENCES offering_slot_instances(id);

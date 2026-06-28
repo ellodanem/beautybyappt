@@ -11,7 +11,7 @@ import { registerPaymentRoutes } from "./payments.js";
 import { registerAppointmentPaymentRoutes } from "./appointment-payments.js";
 import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
-import { backfillServiceSlugs, uniqueServiceSlug } from "./services.js";
+import { backfillServiceSlugs, uniqueServiceSlug, syncServiceAddons, loadServiceAddons } from "./services.js";
 import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
 import { derivePaymentStatus } from "../shared/payment.js";
 import { loadPendingPaymentSummary } from "./appointment-payments.js";
@@ -88,8 +88,26 @@ const ServiceSchema = z.object({
   color: z.string(),
   category: z.string(),
   active: z.number().int(),
+  allow_addons: z.number().int().optional(),
   created_at: z.string(),
 }).openapi("Service");
+
+const ServiceAddonSchema = z.object({
+  id: z.number().int().optional(),
+  name: z.string(),
+  price: z.number(),
+  extra_duration: z.number().int().optional(),
+  active: z.number().int().optional(),
+}).openapi("ServiceAddon");
+
+const AppointmentServiceAddonSchema = z.object({
+  id: z.number().int(),
+  appointment_id: z.number().int(),
+  service_addon_id: z.number().int(),
+  price: z.number(),
+  name: z.string().optional(),
+  extra_duration: z.number().int().optional(),
+}).openapi("AppointmentServiceAddon");
 
 const AppointmentNoteSchema = z.object({
   id: z.number().int(),
@@ -156,6 +174,8 @@ const AppointmentSchema = z.object({
   offering_base_price: z.number().nullable().optional(),
   offering_addons: z.array(OfferingAddonSchema).optional(),
   appointment_offering_addons: z.array(AppointmentOfferingAddonSchema).optional(),
+  service_addons: z.array(ServiceAddonSchema).optional(),
+  appointment_service_addons: z.array(AppointmentServiceAddonSchema).optional(),
   appointment_services: z.array(AppointmentServiceSchema).optional(),
   appointment_notes: z.array(AppointmentNoteSchema).optional(),
   pending_payment: z.object({
@@ -330,23 +350,42 @@ app.openapi(listAppointments, async (c) => {
 
   if (appointments.length > 0) {
     const aptIds = appointments.map((a) => a.id as number);
-    const assignedAddons = await query<Record<string, unknown>>(
+    const placeholders = aptIds.map(() => "?").join(",");
+    const assignedOfferingAddons = await query<Record<string, unknown>>(
       `SELECT aoa.*, oa.name, oa.extra_duration
        FROM appointment_offering_addons aoa
        JOIN offering_addons oa ON oa.id = aoa.offering_addon_id
-       WHERE aoa.appointment_id IN (${aptIds.map(() => "?").join(",")})
+       WHERE aoa.appointment_id IN (${placeholders})
        ORDER BY oa.name`,
       aptIds,
     );
-    const addonsByAppointment = new Map<number, Record<string, unknown>[]>();
-    for (const addon of assignedAddons) {
+    const offeringAddonsByAppointment = new Map<number, Record<string, unknown>[]>();
+    for (const addon of assignedOfferingAddons) {
       const aptId = addon.appointment_id as number;
-      const list = addonsByAppointment.get(aptId);
+      const list = offeringAddonsByAppointment.get(aptId);
       if (list) list.push(addon);
-      else addonsByAppointment.set(aptId, [addon]);
+      else offeringAddonsByAppointment.set(aptId, [addon]);
     }
+
+    const assignedServiceAddons = await query<Record<string, unknown>>(
+      `SELECT asa.*, sa.name, sa.extra_duration
+       FROM appointment_service_addons asa
+       JOIN service_addons sa ON sa.id = asa.service_addon_id
+       WHERE asa.appointment_id IN (${placeholders})
+       ORDER BY sa.name`,
+      aptIds,
+    );
+    const serviceAddonsByAppointment = new Map<number, Record<string, unknown>[]>();
+    for (const addon of assignedServiceAddons) {
+      const aptId = addon.appointment_id as number;
+      const list = serviceAddonsByAppointment.get(aptId);
+      if (list) list.push(addon);
+      else serviceAddonsByAppointment.set(aptId, [addon]);
+    }
+
     for (const apt of appointments) {
-      apt.appointment_offering_addons = addonsByAppointment.get(apt.id as number) ?? [];
+      apt.appointment_offering_addons = offeringAddonsByAppointment.get(apt.id as number) ?? [];
+      apt.appointment_service_addons = serviceAddonsByAppointment.get(apt.id as number) ?? [];
     }
   }
 
@@ -457,7 +496,7 @@ app.openapi(getAppointment, async (c) => {
   );
   apt.appointment_notes = notes;
 
-  const assignedAddons = await query<Record<string, unknown>>(
+  const assignedOfferingAddons = await query<Record<string, unknown>>(
     `SELECT aoa.*, oa.name, oa.extra_duration
      FROM appointment_offering_addons aoa
      JOIN offering_addons oa ON oa.id = aoa.offering_addon_id
@@ -465,7 +504,17 @@ app.openapi(getAppointment, async (c) => {
      ORDER BY oa.name`,
     [id],
   );
-  apt.appointment_offering_addons = assignedAddons;
+  apt.appointment_offering_addons = assignedOfferingAddons;
+
+  const assignedServiceAddons = await query<Record<string, unknown>>(
+    `SELECT asa.*, sa.name, sa.extra_duration
+     FROM appointment_service_addons asa
+     JOIN service_addons sa ON sa.id = asa.service_addon_id
+     WHERE asa.appointment_id = ?
+     ORDER BY sa.name`,
+    [id],
+  );
+  apt.appointment_service_addons = assignedServiceAddons;
 
   if (apt.offering_id) {
     apt.offering_addons = await query<Record<string, unknown>>(
@@ -475,6 +524,17 @@ app.openapi(getAppointment, async (c) => {
        ORDER BY id`,
       [apt.offering_id],
     );
+  }
+
+  const primaryService = svcs[0] as { service_id: number } | undefined;
+  if (primaryService?.service_id) {
+    const service = await get<{ allow_addons: number }>(
+      "SELECT allow_addons FROM services WHERE id = ?",
+      [primaryService.service_id],
+    );
+    if (service?.allow_addons) {
+      apt.service_addons = await loadServiceAddons(primaryService.service_id);
+    }
   }
 
   const pendingPayment = await loadPendingPaymentSummary(
@@ -520,36 +580,93 @@ app.openapi(updateAppointmentAddons, async (c) => {
     [id],
   );
   if (!apt) return c.json({ error: "Not found" }, 404);
-  if (!apt.offering_slot_instance_id) {
-    return c.json({ error: "This appointment is not linked to an offering" }, 400);
-  }
-
-  const slot = await get<{
-    offering_id: number;
-    base_price: number;
-    duration: number;
-  }>(
-    `SELECT si.offering_id, o.base_price, o.duration
-     FROM offering_slot_instances si
-     JOIN offerings o ON o.id = si.offering_id
-     WHERE si.id = ?`,
-    [apt.offering_slot_instance_id],
-  );
-  if (!slot) return c.json({ error: "Offering slot not found" }, 404);
 
   const uniqueIds = [...new Set(addon_ids)];
+
+  if (apt.offering_slot_instance_id) {
+    const slot = await get<{
+      offering_id: number;
+      base_price: number;
+      duration: number;
+    }>(
+      `SELECT si.offering_id, o.base_price, o.duration
+       FROM offering_slot_instances si
+       JOIN offerings o ON o.id = si.offering_id
+       WHERE si.id = ?`,
+      [apt.offering_slot_instance_id],
+    );
+    if (!slot) return c.json({ error: "Offering slot not found" }, 404);
+
+    let addonPrice = 0;
+    let extraDuration = 0;
+    const selected: { id: number; price: number }[] = [];
+
+    if (uniqueIds.length > 0) {
+      const addons = await query<{ id: number; price: number; extra_duration: number }>(
+        `SELECT id, price, extra_duration FROM offering_addons
+         WHERE offering_id = ? AND active = 1 AND id IN (${uniqueIds.map(() => "?").join(",")})`,
+        [slot.offering_id, ...uniqueIds],
+      );
+      if (addons.length !== uniqueIds.length) {
+        return c.json({ error: "One or more add-ons are invalid for this offering" }, 400);
+      }
+      for (const addon of addons) {
+        addonPrice += addon.price;
+        extraDuration += addon.extra_duration;
+        selected.push({ id: addon.id, price: addon.price });
+      }
+    }
+
+    await run("DELETE FROM appointment_offering_addons WHERE appointment_id = ?", [id]);
+    for (const addon of selected) {
+      await run(
+        "INSERT INTO appointment_offering_addons (appointment_id, offering_addon_id, price) VALUES (?, ?, ?)",
+        [id, addon.id, addon.price],
+      );
+    }
+
+    const travelFee = apt.travel_fee ?? 0;
+    const totalPrice = slot.base_price + addonPrice + travelFee;
+    const endTime = addMinutes(apt.start_time, slot.duration + extraDuration);
+
+    await run(
+      "UPDATE appointments SET total_price = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
+      [totalPrice, endTime, id],
+    );
+
+    return c.json({ ok: true }, 200);
+  }
+
+  const apptService = await get<{ service_id: number; price: number; duration: number }>(
+    `SELECT service_id, price, duration FROM appointment_services
+     WHERE appointment_id = ?
+     ORDER BY id LIMIT 1`,
+    [id],
+  );
+  if (!apptService) {
+    return c.json({ error: "This appointment is not linked to a bookable service" }, 400);
+  }
+
+  const service = await get<{ allow_addons: number }>(
+    "SELECT allow_addons FROM services WHERE id = ?",
+    [apptService.service_id],
+  );
+  if (!service?.allow_addons) {
+    return c.json({ error: "Extras are not enabled for this service" }, 400);
+  }
+
   let addonPrice = 0;
   let extraDuration = 0;
   const selected: { id: number; price: number }[] = [];
 
   if (uniqueIds.length > 0) {
     const addons = await query<{ id: number; price: number; extra_duration: number }>(
-      `SELECT id, price, extra_duration FROM offering_addons
-       WHERE offering_id = ? AND active = 1 AND id IN (${uniqueIds.map(() => "?").join(",")})`,
-      [slot.offering_id, ...uniqueIds],
+      `SELECT id, price, extra_duration FROM service_addons
+       WHERE service_id = ? AND active = 1 AND id IN (${uniqueIds.map(() => "?").join(",")})`,
+      [apptService.service_id, ...uniqueIds],
     );
     if (addons.length !== uniqueIds.length) {
-      return c.json({ error: "One or more add-ons are invalid for this offering" }, 400);
+      return c.json({ error: "One or more extras are invalid for this service" }, 400);
     }
     for (const addon of addons) {
       addonPrice += addon.price;
@@ -558,17 +675,17 @@ app.openapi(updateAppointmentAddons, async (c) => {
     }
   }
 
-  await run("DELETE FROM appointment_offering_addons WHERE appointment_id = ?", [id]);
+  await run("DELETE FROM appointment_service_addons WHERE appointment_id = ?", [id]);
   for (const addon of selected) {
     await run(
-      "INSERT INTO appointment_offering_addons (appointment_id, offering_addon_id, price) VALUES (?, ?, ?)",
+      "INSERT INTO appointment_service_addons (appointment_id, service_addon_id, price) VALUES (?, ?, ?)",
       [id, addon.id, addon.price],
     );
   }
 
   const travelFee = apt.travel_fee ?? 0;
-  const totalPrice = slot.base_price + addonPrice + travelFee;
-  const endTime = addMinutes(apt.start_time, slot.duration + extraDuration);
+  const totalPrice = apptService.price + addonPrice + travelFee;
+  const endTime = addMinutes(apt.start_time, apptService.duration + extraDuration);
 
   await run(
     "UPDATE appointments SET total_price = ?, end_time = ?, updated_at = datetime('now') WHERE id = ?",
@@ -1169,6 +1286,13 @@ app.openapi(listServices, async (c) => {
   return c.json({ services }, 200);
 });
 
+const ServiceAddonInputSchema = z.object({
+  id: z.number().int().optional(),
+  name: z.string(),
+  price: z.number(),
+  extra_duration: z.number().int().optional(),
+});
+
 const createService = createRoute({
   method: "post",
   path: "/api/services",
@@ -1180,6 +1304,8 @@ const createService = createRoute({
       price: z.number().optional(),
       color: z.string().optional(),
       category: z.string().optional(),
+      allow_addons: z.number().int().optional(),
+      addons: z.array(ServiceAddonInputSchema).optional(),
     }) } } },
   },
   responses: { 201: { description: "Created", content: { "application/json": { schema: z.object({ service: ServiceSchema }) } } } },
@@ -1187,13 +1313,58 @@ const createService = createRoute({
 
 app.openapi(createService, async (c) => {
   const body = c.req.valid("json");
-  const slug = await uniqueServiceSlug(body.name);
+  const { addons, ...fields } = body;
+  const slug = await uniqueServiceSlug(fields.name);
   const result = await run(
-    "INSERT INTO services (name, slug, description, duration, price, color, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [body.name, slug, body.description || "", body.duration || 60, body.price || 0, body.color || "#6b7280", body.category || ""],
+    "INSERT INTO services (name, slug, description, duration, price, color, category, allow_addons) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      fields.name,
+      slug,
+      fields.description || "",
+      fields.duration || 60,
+      fields.price || 0,
+      fields.color || "#6b7280",
+      fields.category || "",
+      fields.allow_addons ? 1 : 0,
+    ],
   );
-  const service = await get<Record<string, unknown>>("SELECT * FROM services WHERE id = ?", [result.lastInsertRowid]);
+  const serviceId = result.lastInsertRowid as number;
+  if (fields.allow_addons && addons?.length) {
+    await syncServiceAddons(serviceId, addons);
+  }
+  const service = await get<Record<string, unknown>>("SELECT * FROM services WHERE id = ?", [serviceId]);
   return c.json({ service }, 201);
+});
+
+const getService = createRoute({
+  method: "get",
+  path: "/api/services/{id}",
+  request: { params: IdParam },
+  responses: {
+    200: {
+      description: "Service detail",
+      content: {
+        "application/json": {
+          schema: z.object({
+            service: ServiceSchema,
+            addons: z.array(ServiceAddonSchema),
+          }),
+        },
+      },
+    },
+    404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+  },
+});
+
+app.openapi(getService, async (c) => {
+  const { id } = c.req.valid("param");
+  await backfillServiceSlugs();
+  const service = await get<Record<string, unknown>>("SELECT * FROM services WHERE id = ?", [id]);
+  if (!service) return c.json({ error: "Not found" }, 404);
+  const addons = service.allow_addons
+    ? await loadServiceAddons(parseInt(String(id), 10))
+    : [];
+  return c.json({ service, addons }, 200);
 });
 
 const updateService = createRoute({
@@ -1209,6 +1380,8 @@ const updateService = createRoute({
       color: z.string().optional(),
       category: z.string().optional(),
       active: z.number().int().optional(),
+      allow_addons: z.number().int().optional(),
+      addons: z.array(ServiceAddonInputSchema).optional(),
     }) } } },
   },
   responses: { 200: { description: "Updated", content: { "application/json": { schema: OkSchema } } } },
@@ -1217,13 +1390,31 @@ const updateService = createRoute({
 app.openapi(updateService, async (c) => {
   const { id } = c.req.valid("param");
   const body = c.req.valid("json");
+  const { addons, ...fields } = body;
   const sets: string[] = [];
   const params: unknown[] = [];
-  for (const [key, val] of Object.entries(body)) {
+  for (const [key, val] of Object.entries(fields)) {
     if (val !== undefined) { sets.push(`${key} = ?`); params.push(val); }
   }
   if (sets.length > 0) {
     await run(`UPDATE services SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
+  }
+  if (addons !== undefined) {
+    const service = await get<{ allow_addons: number }>("SELECT allow_addons FROM services WHERE id = ?", [id]);
+    if (service?.allow_addons) {
+      await syncServiceAddons(parseInt(String(id), 10), addons);
+    } else if (addons.length > 0) {
+      await run("UPDATE services SET allow_addons = 1 WHERE id = ?", [id]);
+      await syncServiceAddons(parseInt(String(id), 10), addons);
+    }
+  } else if (fields.allow_addons === 0) {
+    const existing = await query<{ id: number }>(
+      "SELECT id FROM service_addons WHERE service_id = ? AND active = 1",
+      [id],
+    );
+    for (const row of existing) {
+      await run("UPDATE service_addons SET active = 0 WHERE id = ?", [row.id]);
+    }
   }
   return c.json({ ok: true }, 200);
 });

@@ -34,6 +34,8 @@ export interface Appointment {
   offering_base_price?: number | null;
   offering_addons?: OfferingAddon[];
   appointment_offering_addons?: AppointmentOfferingAddon[];
+  service_addons?: ServiceAddon[];
+  appointment_service_addons?: AppointmentServiceAddon[];
   appointment_services?: AppointmentService[];
   appointment_notes?: AppointmentNote[];
   pending_payment?: { amount: number; currency: string; created_at: string; page_url?: string | null; checkout_url?: string | null } | null;
@@ -54,6 +56,15 @@ export interface AppointmentOfferingAddon {
   id: number;
   appointment_id: number;
   offering_addon_id: number;
+  price: number;
+  name?: string;
+  extra_duration?: number;
+}
+
+export interface AppointmentServiceAddon {
+  id: number;
+  appointment_id: number;
+  service_addon_id: number;
   price: number;
   name?: string;
   extra_duration?: number;
@@ -102,7 +113,16 @@ export interface Service {
   color: string;
   category: string;
   active: number;
+  allow_addons?: number;
   created_at: string;
+}
+
+export interface ServiceAddon {
+  id?: number;
+  name: string;
+  price: number;
+  extra_duration?: number;
+  active?: number;
 }
 
 export interface BlockedSlot {

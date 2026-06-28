@@ -1,12 +1,14 @@
 import { useState, useEffect } from "preact/hooks";
 import { useApp } from "../context";
+import { api } from "../api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChevronLeft, Check } from "lucide-preact";
+import { ChevronLeft, Check, Plus, Trash2 } from "lucide-preact";
 import { formatMoney, getCurrency } from "../../shared/currency";
 import { pickUnusedServiceColor } from "../../shared/service-colors";
+import type { ServiceAddon } from "../types";
 
 interface Props {
   serviceId?: number;
@@ -19,28 +21,62 @@ export function AnytimeOfferForm({ serviceId }: Props) {
   const [name, setName] = useState("");
   const [price, setPrice] = useState("75");
   const [duration, setDuration] = useState("60");
+  const [allowAddons, setAllowAddons] = useState(false);
+  const [addons, setAddons] = useState<ServiceAddon[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!serviceId) return;
+    api<{ service: { allow_addons?: number }; addons: ServiceAddon[] }>("GET", `/api/services/${serviceId}`)
+      .then((data) => {
+        setAllowAddons(!!data.service.allow_addons);
+        setAddons(data.addons.length > 0 ? data.addons : [{ name: "", price: 0, extra_duration: 0 }]);
+      })
+      .catch((err) => setError((err as Error).message));
+  }, [serviceId, setError]);
 
   useEffect(() => {
     if (existing) {
       setName(existing.name);
       setPrice(String(existing.price));
       setDuration(String(existing.duration));
+      if (!serviceId) {
+        setAllowAddons(!!existing.allow_addons);
+      }
     }
-  }, [existing]);
+  }, [existing, serviceId]);
 
   const currency = getCurrency(defaultCurrency);
+
+  const updateAddon = (index: number, field: keyof ServiceAddon, value: string | number) => {
+    setAddons((prev) => prev.map((addon, i) => (i === index ? { ...addon, [field]: value } : addon)));
+  };
+
+  const addAddonRow = () => {
+    setAddons((prev) => [...prev, { name: "", price: 0, extra_duration: 0 }]);
+  };
+
+  const removeAddonRow = (index: number) => {
+    setAddons((prev) => prev.filter((_, i) => i !== index));
+  };
 
   const handleSave = async () => {
     if (!name.trim()) {
       setError("Give it a name — e.g. Everyday glam");
       return;
     }
+    if (allowAddons) {
+      const validAddons = addons.filter((a) => a.name.trim());
+      if (validAddons.length === 0) {
+        setError("Add at least one extra, or turn off extras");
+        return;
+      }
+    }
     setSaving(true);
     setSaved(false);
     try {
-      const data = {
+      const payload = {
         name: name.trim(),
         price: parseFloat(price) || 0,
         duration: parseInt(duration, 10) || 60,
@@ -48,11 +84,13 @@ export function AnytimeOfferForm({ serviceId }: Props) {
         category: existing?.category || "General",
         color: existing?.color || pickUnusedServiceColor(services.filter((s) => s.active).map((s) => s.color)),
         active: 1,
+        allow_addons: allowAddons ? 1 : 0,
+        addons: allowAddons ? addons.filter((a) => a.name.trim()) : [],
       };
       if (serviceId) {
-        await updateService(serviceId, data);
+        await updateService(serviceId, payload);
       } else {
-        await addService(data);
+        await addService(payload);
       }
       setSaved(true);
       setTimeout(() => navigate("/offers"), 600);
@@ -126,6 +164,65 @@ export function AnytimeOfferForm({ serviceId }: Props) {
           <p className="text-sm text-muted-foreground">
             Preview: {formatMoney(parseFloat(price) || 0, defaultCurrency)} · {duration} min
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Extras</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={allowAddons}
+              onChange={(e) => {
+                const enabled = (e.target as HTMLInputElement).checked;
+                setAllowAddons(enabled);
+                if (enabled && addons.length === 0) {
+                  setAddons([{ name: "", price: 0, extra_duration: 0 }]);
+                }
+              }}
+            />
+            <span>
+              <span className="font-medium">Let clients add extras</span>
+              <span className="mt-1 block text-sm text-muted-foreground">
+                Optional add-ons like lashes, gems, or touch-ups — clients pick what they want when booking.
+              </span>
+            </span>
+          </label>
+
+          {allowAddons && (
+            <div className="space-y-3">
+              <Label>Extras clients can add</Label>
+              {addons.map((addon, i) => (
+                <div key={addon.id ?? i} className="flex gap-2">
+                  <Input
+                    placeholder="e.g. Lashes"
+                    className="h-11"
+                    value={addon.name}
+                    onInput={(e) => updateAddon(i, "name", (e.target as HTMLInputElement).value)}
+                  />
+                  <Input
+                    type="number"
+                    placeholder={`+${currency.code}`}
+                    className="h-11 w-24"
+                    value={addon.price}
+                    onInput={(e) => updateAddon(i, "price", parseFloat((e.target as HTMLInputElement).value) || 0)}
+                  />
+                  {addons.length > 1 && (
+                    <Button variant="ghost" size="icon" onClick={() => removeAddonRow(i)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button variant="outline" size="sm" onClick={addAddonRow}>
+                <Plus className="mr-1 h-3.5 w-3.5" /> Add extra
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

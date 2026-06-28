@@ -37,4 +37,26 @@ export async function ensureSqliteSchema(): Promise<void> {
     await run("ALTER TABLE payments ADD COLUMN link_token TEXT");
     await run("CREATE INDEX IF NOT EXISTS idx_payments_link_token ON payments(link_token)");
   }
+
+  const serviceCols = await query<{ name: string }>("PRAGMA table_info(services)");
+  if (serviceCols.length > 0 && !serviceCols.some((c) => c.name === "allow_addons")) {
+    await run("ALTER TABLE services ADD COLUMN allow_addons INTEGER NOT NULL DEFAULT 0");
+  }
+
+  await run(`CREATE TABLE IF NOT EXISTS service_addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    price REAL NOT NULL DEFAULT 0,
+    extra_duration INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
+  )`);
+  await run(`CREATE TABLE IF NOT EXISTS appointment_service_addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+    service_addon_id INTEGER NOT NULL REFERENCES service_addons(id),
+    price REAL NOT NULL DEFAULT 0
+  )`);
+  await run("CREATE INDEX IF NOT EXISTS idx_service_addons_service ON service_addons(service_id)");
+  await run("CREATE INDEX IF NOT EXISTS idx_appointment_service_addons_appointment ON appointment_service_addons(appointment_id)");
 }
