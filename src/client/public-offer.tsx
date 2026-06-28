@@ -678,7 +678,141 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
               {selectedSlot && (
 
-                <div ref={detailsRef} id="booking-details" className="scroll-mt-24">
+                <div ref={detailsRef} id="booking-details" className="scroll-mt-24 space-y-6">
+
+                  {addons.length > 0 && (
+
+                    <Card>
+
+                      <CardHeader className="pb-2">
+
+                        <CardTitle className="text-base">Add extras</CardTitle>
+
+                      </CardHeader>
+
+                      <CardContent className="space-y-2">
+
+                        {addons.map((addon) => (
+
+                          <label key={addon.id} className="flex cursor-pointer items-center gap-2 text-sm">
+
+                            <input
+
+                              type="checkbox"
+
+                              checked={selectedAddons.includes(addon.id)}
+
+                              onChange={() => toggleAddon(addon.id)}
+
+                            />
+
+                            <span className="flex-1">{addon.name}</span>
+
+                            <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
+
+                          </label>
+
+                        ))}
+
+                      </CardContent>
+
+                    </Card>
+
+                  )}
+
+                  {totalPrice > 0 && clientPaymentChoice && (
+
+                    <Card>
+
+                      <CardHeader className="pb-2">
+
+                        <CardTitle className="text-base">Payment</CardTitle>
+
+                      </CardHeader>
+
+                      <CardContent className="space-y-4">
+
+                        <label className="flex cursor-pointer items-start gap-2 text-sm">
+
+                          <input
+
+                            type="radio"
+
+                            name="payment_choice"
+
+                            checked={paymentChoice === "full"}
+
+                            onChange={() => setPaymentChoice("full")}
+
+                          />
+
+                          <span>
+
+                            <span className="font-medium">Pay in full</span>
+
+                            <span className="block text-muted-foreground">
+
+                              {formatMoney(fullCheckoutTotal, currency)} now
+
+                            </span>
+
+                          </span>
+
+                        </label>
+
+                        <label className="flex cursor-pointer items-start gap-2 text-sm">
+
+                          <input
+
+                            type="radio"
+
+                            name="payment_choice"
+
+                            checked={paymentChoice === "deposit"}
+
+                            onChange={() => setPaymentChoice("deposit")}
+
+                          />
+
+                          <span>
+
+                            <span className="font-medium">Pay deposit</span>
+
+                            <span className="block text-muted-foreground">
+
+                              {formatMoney(depositCheckoutTotal, currency)} now
+
+                            </span>
+
+                          </span>
+
+                        </label>
+
+                        {balanceDue > 0 && paymentChoice === "deposit" && (
+
+                          <p className="text-sm text-muted-foreground">
+
+                            Balance at appointment: {formatMoney(balanceDue, currency)}
+
+                          </p>
+
+                        )}
+
+                        {!stripeEnabled && (
+
+                          <p className="text-sm text-amber-700">
+
+                            Online payment is not enabled — contact the business to complete your booking.
+
+                          </p>
+
+                        )}
+
+                      </CardContent>
+
+                    </Card>
+
+                  )}
 
                   <Card>
 
@@ -796,67 +930,14 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                         </div>
 
-                        {totalPrice > 0 && clientPaymentChoice && (
-                          <div className="space-y-2 rounded-md border p-3">
-                            <p className="text-sm font-medium">Payment</p>
-                            <label className="flex cursor-pointer items-start gap-2 text-sm">
-                              <input
-                                type="radio"
-                                name="payment_choice"
-                                checked={paymentChoice === "full"}
-                                onChange={() => setPaymentChoice("full")}
-                              />
-                              <span>
-                                <span className="font-medium">Pay in full</span>
-                                <span className="block text-muted-foreground">
-                                  {formatMoney(fullCheckoutTotal, currency)} now
-                                </span>
-                              </span>
-                            </label>
-                            <label className="flex cursor-pointer items-start gap-2 text-sm">
-                              <input
-                                type="radio"
-                                name="payment_choice"
-                                checked={paymentChoice === "deposit"}
-                                onChange={() => setPaymentChoice("deposit")}
-                              />
-                              <span>
-                                <span className="font-medium">Pay deposit</span>
-                                <span className="block text-muted-foreground">
-                                  {formatMoney(depositCheckoutTotal, currency)} now
-                                </span>
-                              </span>
-                            </label>
-                          </div>
-                        )}
+                        {totalPrice > 0 && !stripeEnabled && !clientPaymentChoice && (
 
-                        {addons.length > 0 && (
-                          <div className="space-y-2 rounded-md border p-3">
-                            <p className="text-sm font-medium">Add extras</p>
-                            {addons.map((addon) => (
-                              <label key={addon.id} className="flex cursor-pointer items-center gap-2 text-sm">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedAddons.includes(addon.id)}
-                                  onChange={() => toggleAddon(addon.id)}
-                                />
-                                <span className="flex-1">{addon.name}</span>
-                                <span className="text-muted-foreground">+{formatMoney(addon.price, currency)}</span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-
-                        {totalPrice > 0 && balanceDue > 0 && paymentChoice === "deposit" && (
-                          <p className="text-sm text-muted-foreground">
-                            Balance at appointment: {formatMoney(balanceDue, currency)}
-                          </p>
-                        )}
-
-                        {totalPrice > 0 && !stripeEnabled && (
                           <p className="text-sm text-amber-700">
+
                             Online payment is not enabled — contact the business to complete your booking.
+
                           </p>
+
                         )}
 
                         {error && <p className="text-sm text-destructive">{error}</p>}
