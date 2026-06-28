@@ -131,9 +131,10 @@ export interface AppContextValue {
   addAppointmentNote: (aptId: number, content: string) => Promise<void>;
   deleteAppointmentNote: (noteId: number) => Promise<void>;
   sendAppointmentPaymentLink: (id: number) => Promise<{
-    checkout_url: string;
-    session_id: string;
-    amount: number;
+    page_url: string;
+    link_token: string;
+    balance_due: number;
+    deposit_due: number;
     currency: string;
   }>;
 

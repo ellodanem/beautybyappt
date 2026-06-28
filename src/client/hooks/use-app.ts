@@ -525,9 +525,10 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const sendAppointmentPaymentLink = useCallback(async (id: number) => {
     const res = await api<{
-      checkout_url: string;
-      session_id: string;
-      amount: number;
+      page_url: string;
+      link_token: string;
+      balance_due: number;
+      deposit_due: number;
       currency: string;
     }>("POST", `/api/appointments/${id}/payment-link`);
     if (selectedAppointment && selectedAppointment.id === id) {

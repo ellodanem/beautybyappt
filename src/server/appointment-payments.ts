@@ -76,7 +76,7 @@ function appointmentCheckoutCopy(
 ): { name: string; description: string; submitMessage: string } {
   const serviceLabel = apt.offering_name || apt.service_name || "Appointment";
   const clientLabel = apt.client_name?.trim() || "Client";
-  const isDeposit = amountPaid <= 0 && balance < apt.total_price - 0.009;
+  const isDeposit = amountPaid <= 0 && amount < balance - 0.009;
   const paymentLabel = amountPaid > 0 ? "Balance payment" : isDeposit ? "Deposit" : "Payment";
   const dateTime = `${formatCheckoutDate(apt.scheduled_date)}, ${formatCheckoutTime(apt.start_time)} – ${formatCheckoutTime(apt.end_time)}`;
   const amountDue = formatMoney(amount, currency);
@@ -123,83 +123,29 @@ function resolvePaymentType(
   return "balance";
 }
 
-export async function loadPendingAppointmentPayments(appointmentId: number) {
-  return query<{ id: number; stripe_checkout_session_id: string; amount: number }>(
-    `SELECT id, stripe_checkout_session_id, amount FROM payments
-     WHERE appointment_id = ? AND status = 'pending' AND stripe_checkout_session_id IS NOT NULL`,
-    [appointmentId],
-  );
-}
+const TokenParam = z.object({
+  token: z.string().openapi({ param: { name: "token", in: "path" } }),
+});
 
-export async function loadPendingPaymentSummary(appointmentId: number, env?: StripeEnv) {
-  const row = await get<{
-    amount: number;
-    currency: string;
-    created_at: string;
-    stripe_checkout_session_id: string | null;
-  }>(
-    `SELECT amount, currency, created_at, stripe_checkout_session_id FROM payments
-     WHERE appointment_id = ? AND status = 'pending'
-     ORDER BY created_at DESC LIMIT 1`,
-    [appointmentId],
-  );
-  if (!row) return null;
+type AppointmentPaymentRow = {
+  identifier: string;
+  total_price: number;
+  deposit_amount: number;
+  amount_paid: number;
+  currency: string | null;
+  scheduled_date: string;
+  start_time: string;
+  end_time: string;
+  client_name: string | null;
+  client_email: string | null;
+  staff_name: string | null;
+  offering_name: string | null;
+  service_name: string | null;
+};
 
-  let checkout_url: string | null = null;
-  if (env && row.stripe_checkout_session_id && isStripeConfigured(env)) {
-    try {
-      const session = await retrieveCheckoutSession(env, row.stripe_checkout_session_id);
-      checkout_url = session.url;
-    } catch {
-      checkout_url = null;
-    }
-  }
-
-  return {
-    amount: row.amount,
-    currency: row.currency,
-    created_at: row.created_at,
-    checkout_url,
-  };
-}
-
-export async function expirePendingAppointmentPayments(
-  env: StripeEnv,
-  appointmentId: number,
-): Promise<void> {
-  const pending = await loadPendingAppointmentPayments(appointmentId);
-  for (const payment of pending) {
-    try {
-      await expireCheckoutSession(env, payment.stripe_checkout_session_id);
-    } catch (err) {
-      console.warn("Expire checkout session failed:", (err as Error).message);
-    }
-    await run("UPDATE payments SET status = 'expired' WHERE id = ?", [payment.id]);
-  }
-}
-
-export async function createAppointmentPaymentLink(
-  env: StripeEnv,
-  appointmentId: number,
-  requestUrl: string,
-): Promise<{ checkout_url: string; session_id: string; amount: number; currency: string }> {
-  if (!await isStripePaymentsActive(env)) throw new Error("Stripe payments are disabled");
-
-  const apt = await get<{
-    identifier: string;
-    total_price: number;
-    amount_paid: number;
-    currency: string | null;
-    scheduled_date: string;
-    start_time: string;
-    end_time: string;
-    client_name: string | null;
-    client_email: string | null;
-    staff_name: string | null;
-    offering_name: string | null;
-    service_name: string | null;
-  }>(
-    `SELECT a.identifier, a.total_price, a.amount_paid, a.currency, a.scheduled_date, a.start_time, a.end_time,
+async function loadAppointmentForPayment(appointmentId: number): Promise<AppointmentPaymentRow | null> {
+  return get<AppointmentPaymentRow>(
+    `SELECT a.identifier, a.total_price, a.deposit_amount, a.amount_paid, a.currency, a.scheduled_date, a.start_time, a.end_time,
             cl.name as client_name, cl.email as client_email,
             s.name as staff_name,
             o.name as offering_name,
@@ -215,6 +161,110 @@ export async function createAppointmentPaymentLink(
      WHERE a.id = ?`,
     [appointmentId],
   );
+}
+
+export async function loadPendingAppointmentPayments(appointmentId: number) {
+  return query<{ id: number; stripe_checkout_session_id: string | null; status: string }>(
+    `SELECT id, stripe_checkout_session_id, status FROM payments
+     WHERE appointment_id = ? AND status IN ('open', 'pending')`,
+    [appointmentId],
+  );
+}
+
+export async function loadPendingPaymentSummary(
+  appointmentId: number,
+  env?: StripeEnv,
+  requestUrl?: string,
+) {
+  const row = await get<{
+    amount: number;
+    currency: string;
+    created_at: string;
+    stripe_checkout_session_id: string | null;
+    link_token: string | null;
+    status: string;
+    total_price: number;
+    amount_paid: number;
+  }>(
+    `SELECT p.amount, p.currency, p.created_at, p.stripe_checkout_session_id, p.link_token, p.status,
+            a.total_price, a.amount_paid
+     FROM payments p
+     JOIN appointments a ON a.id = p.appointment_id
+     WHERE p.appointment_id = ? AND p.status IN ('open', 'pending')
+     ORDER BY p.created_at DESC LIMIT 1`,
+    [appointmentId],
+  );
+  if (!row) return null;
+
+  const balance = appointmentBalance(row.total_price, row.amount_paid);
+  const base = env ? appBaseUrl(env, requestUrl) : null;
+  const page_url = row.link_token && base ? `${base}/pay/${row.link_token}` : null;
+
+  let checkout_url = page_url;
+  if (row.status === "pending" && row.stripe_checkout_session_id && env && isStripeConfigured(env)) {
+    try {
+      const session = await retrieveCheckoutSession(env, row.stripe_checkout_session_id);
+      checkout_url = session.url ?? page_url;
+    } catch {
+      checkout_url = page_url;
+    }
+  }
+
+  return {
+    amount: row.status === "pending" && row.amount > 0 ? row.amount : balance,
+    currency: row.currency,
+    created_at: row.created_at,
+    page_url,
+    checkout_url,
+  };
+}
+
+export async function expirePendingAppointmentPayments(
+  env: StripeEnv,
+  appointmentId: number,
+): Promise<void> {
+  const active = await loadPendingAppointmentPayments(appointmentId);
+  for (const payment of active) {
+    if (payment.status === "pending" && payment.stripe_checkout_session_id) {
+      try {
+        await expireCheckoutSession(env, payment.stripe_checkout_session_id);
+      } catch (err) {
+        console.warn("Expire checkout session failed:", (err as Error).message);
+      }
+    }
+    await run("UPDATE payments SET status = 'expired' WHERE id = ?", [payment.id]);
+  }
+}
+
+async function loadPaymentByToken(token: string) {
+  return get<{
+    id: number;
+    appointment_id: number;
+    status: string;
+    stripe_checkout_session_id: string | null;
+    amount: number;
+    currency: string;
+  }>(
+    `SELECT id, appointment_id, status, stripe_checkout_session_id, amount, currency FROM payments
+     WHERE link_token = ? AND status IN ('open', 'pending')`,
+    [token],
+  );
+}
+
+export async function createAppointmentPaymentLink(
+  env: StripeEnv,
+  appointmentId: number,
+  requestUrl: string,
+): Promise<{
+  page_url: string;
+  link_token: string;
+  balance_due: number;
+  deposit_due: number;
+  currency: string;
+}> {
+  if (!await isStripePaymentsActive(env)) throw new Error("Stripe payments are disabled");
+
+  const apt = await loadAppointmentForPayment(appointmentId);
   if (!apt) throw new Error("Appointment not found");
 
   const total = apt.total_price ?? 0;
@@ -232,7 +282,79 @@ export async function createAppointmentPaymentLink(
 
   await expirePendingAppointmentPayments(env, appointmentId);
 
-  const amount = Math.round(balance * 100) / 100;
+  const token = generateBookingToken();
+  const base = appBaseUrl(env, requestUrl);
+  const depositDue = appointmentCheckoutAmount(apt, "deposit");
+
+  await run(
+    `INSERT INTO payments (appointment_id, link_token, amount, currency, type, status)
+     VALUES (?, ?, 0, ?, 'link', 'open')`,
+    [appointmentId, token, currency],
+  );
+
+  await run(
+    "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
+    [appointmentId, `Payment link sent — client can book with deposit (${formatMoney(depositDue, currency)}) or pay in full (${formatMoney(balance, currency)})`],
+  );
+
+  return {
+    page_url: `${base}/pay/${token}`,
+    link_token: token,
+    balance_due: balance,
+    deposit_due: depositDue,
+    currency,
+  };
+}
+
+export async function createAppointmentStripeCheckout(
+  env: StripeEnv,
+  token: string,
+  paymentChoice: PaymentChoice,
+  requestUrl: string,
+): Promise<{ checkout_url: string; session_id: string; amount: number; currency: string }> {
+  if (!await isStripePaymentsActive(env)) throw new Error("Stripe payments are disabled");
+
+  const payment = await loadPaymentByToken(token);
+  if (!payment) throw new Error("Payment link not found or expired");
+
+  const apt = await loadAppointmentForPayment(payment.appointment_id);
+  if (!apt) throw new Error("Appointment not found");
+
+  const total = apt.total_price ?? 0;
+  const amountPaid = apt.amount_paid ?? 0;
+  const balance = appointmentBalance(total, amountPaid);
+  if (balance <= 0) throw new Error("This booking is already paid in full");
+
+  const hasChoice = appointmentHasPaymentChoice(apt);
+  const choice: PaymentChoice = hasChoice && paymentChoice === "deposit" ? "deposit" : "full";
+  const amount = Math.round(appointmentCheckoutAmount(apt, choice) * 100) / 100;
+
+  if (payment.status === "pending" && payment.stripe_checkout_session_id) {
+    try {
+      const existing = await retrieveCheckoutSession(env, payment.stripe_checkout_session_id);
+      if (existing.url && existing.payment_status !== "paid") {
+        const existingAmount = existing.amount_total != null ? existing.amount_total / 100 : payment.amount;
+        if (Math.abs(existingAmount - amount) < 0.01) {
+          return {
+            checkout_url: existing.url,
+            session_id: existing.id,
+            amount: payment.amount,
+            currency: payment.currency,
+          };
+        }
+        await expireCheckoutSession(env, payment.stripe_checkout_session_id);
+      }
+    } catch {
+      // create a fresh session below
+    }
+  }
+
+  const currency = (apt.currency || payment.currency || "USD").toUpperCase();
+  const minCharge = minChargeAmount(currency);
+  if (amount < minCharge) {
+    throw new Error(`Amount must be at least ${currency} ${minCharge.toFixed(2)} to collect via Stripe`);
+  }
+
   const base = appBaseUrl(env, requestUrl);
   const checkoutCopy = appointmentCheckoutCopy(apt, amountPaid, balance, amount, currency);
 
@@ -244,14 +366,16 @@ export async function createAppointmentPaymentLink(
       amount,
     }],
     successUrl: `${base}/pay/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancelUrl: `${base}/pay/cancelled`,
+    cancelUrl: `${base}/pay/${token}?cancelled=1`,
     customerEmail: apt.client_email ?? undefined,
     submitMessage: checkoutCopy.submitMessage,
+    submitButtonLabel: "Book",
     metadata: {
       type: "appointment_payment",
-      appointment_id: String(appointmentId),
+      appointment_id: String(payment.appointment_id),
       amount: amount.toFixed(2),
       identifier: apt.identifier,
+      payment_choice: choice,
     },
   });
 
@@ -260,17 +384,60 @@ export async function createAppointmentPaymentLink(
   const paymentType = amountPaid <= 0 && amount >= total - 0.009 ? "full" : amountPaid <= 0 ? "deposit" : "balance";
 
   await run(
-    `INSERT INTO payments (appointment_id, stripe_checkout_session_id, amount, currency, type, status)
-     VALUES (?, ?, ?, ?, ?, 'pending')`,
-    [appointmentId, session.id, amount, currency, paymentType],
-  );
-
-  await run(
-    "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
-    [appointmentId, `Payment link sent for ${currency} ${amount.toFixed(2)}`],
+    `UPDATE payments SET stripe_checkout_session_id = ?, amount = ?, type = ?, status = 'pending' WHERE id = ?`,
+    [session.id, amount, paymentType, payment.id],
   );
 
   return { checkout_url: session.url, session_id: session.id, amount, currency };
+}
+
+export async function loadPublicPaymentPage(token: string, env: StripeEnv) {
+  const payment = await loadPaymentByToken(token);
+  if (!payment) return null;
+
+  const apt = await loadAppointmentForPayment(payment.appointment_id);
+  if (!apt) return null;
+
+  const balance = appointmentBalance(apt.total_price, apt.amount_paid ?? 0);
+  if (balance <= 0) return null;
+
+  const currency = (apt.currency || payment.currency || "USD").toUpperCase();
+  const hasChoice = appointmentHasPaymentChoice(apt);
+  const depositAmount = appointmentCheckoutAmount(apt, "deposit");
+  const fullAmount = appointmentCheckoutAmount(apt, "full");
+
+  let continueCheckoutUrl: string | null = null;
+  if (payment.status === "pending" && payment.stripe_checkout_session_id && isStripeConfigured(env)) {
+    try {
+      const session = await retrieveCheckoutSession(env, payment.stripe_checkout_session_id);
+      continueCheckoutUrl = session.url;
+    } catch {
+      continueCheckoutUrl = null;
+    }
+  }
+
+  return {
+    appointment: {
+      identifier: apt.identifier,
+      scheduled_date: apt.scheduled_date,
+      start_time: apt.start_time,
+      end_time: apt.end_time,
+      total_price: apt.total_price,
+      deposit_amount: apt.deposit_amount ?? 0,
+      amount_paid: apt.amount_paid ?? 0,
+      currency,
+      client_name: apt.client_name,
+      staff_name: apt.staff_name,
+      offering_name: apt.offering_name,
+      service_name: apt.service_name,
+    },
+    payment_choice_available: hasChoice,
+    deposit_amount: depositAmount,
+    full_amount: fullAmount,
+    balance_due: balance,
+    continue_checkout_url: continueCheckoutUrl,
+    status: payment.status,
+  };
 }
 
 export async function finalizeAppointmentPaymentCheckout(
@@ -359,7 +526,7 @@ export async function finalizeAppointmentPaymentCheckout(
   );
 
   await run(
-    `UPDATE payments SET status = 'expired' WHERE appointment_id = ? AND status = 'pending' AND stripe_checkout_session_id != ?`,
+    `UPDATE payments SET status = 'expired' WHERE appointment_id = ? AND status IN ('open', 'pending') AND (stripe_checkout_session_id IS NULL OR stripe_checkout_session_id != ?)`,
     [appointmentId, sessionId],
   );
 
@@ -387,13 +554,14 @@ export function registerAppointmentPaymentRoutes(app: OpenAPIHono<any>) {
     request: { params: IdParam },
     responses: {
       200: {
-        description: "Stripe Checkout session for appointment balance",
+        description: "Public payment page link for appointment",
         content: {
           "application/json": {
             schema: z.object({
-              checkout_url: z.string(),
-              session_id: z.string(),
-              amount: z.number(),
+              page_url: z.string(),
+              link_token: z.string(),
+              balance_due: z.number(),
+              deposit_due: z.number(),
               currency: z.string(),
             }),
           },
@@ -415,6 +583,81 @@ export function registerAppointmentPaymentRoutes(app: OpenAPIHono<any>) {
     try {
       const result = await createAppointmentPaymentLink(env, appointmentId, c.req.url);
       return c.json(result, 200);
+    } catch (err) {
+      return c.json({ error: (err as Error).message }, 400);
+    }
+  });
+
+  const getPublicPayment = createRoute({
+    method: "get",
+    path: "/api/pay/public/{token}",
+    request: { params: TokenParam },
+    responses: {
+      200: {
+        description: "Public appointment payment page data",
+        content: { "application/json": { schema: z.object({}).passthrough() } },
+      },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(getPublicPayment, async (c) => {
+    const { token } = c.req.valid("param");
+    const env = runtimeEnv(c.env) as StripeEnv;
+    const data = await loadPublicPaymentPage(token, env);
+    if (!data) return c.json({ error: "Payment link not found or expired" }, 404);
+    return c.json(data, 200);
+  });
+
+  const checkoutPublicPayment = createRoute({
+    method: "post",
+    path: "/api/pay/public/{token}/checkout",
+    request: {
+      params: TokenParam,
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              payment_choice: z.enum(["full", "deposit"]).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Stripe Checkout redirect URL",
+        content: {
+          "application/json": {
+            schema: z.object({
+              checkout_url: z.string(),
+              amount: z.number(),
+              currency: z.string(),
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(checkoutPublicPayment, async (c) => {
+    const { token } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const env = runtimeEnv(c.env) as StripeEnv;
+    try {
+      const result = await createAppointmentStripeCheckout(
+        env,
+        token,
+        body.payment_choice === "deposit" ? "deposit" : "full",
+        c.req.url,
+      );
+      return c.json({
+        checkout_url: result.checkout_url,
+        amount: result.amount,
+        currency: result.currency,
+      }, 200);
     } catch (err) {
       return c.json({ error: (err as Error).message }, 400);
     }

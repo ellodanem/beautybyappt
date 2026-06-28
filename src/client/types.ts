@@ -36,7 +36,7 @@ export interface Appointment {
   appointment_offering_addons?: AppointmentOfferingAddon[];
   appointment_services?: AppointmentService[];
   appointment_notes?: AppointmentNote[];
-  pending_payment?: { amount: number; currency: string; created_at: string; checkout_url?: string | null } | null;
+  pending_payment?: { amount: number; currency: string; created_at: string; page_url?: string | null; checkout_url?: string | null } | null;
   created_at: string;
   updated_at: string;
 }

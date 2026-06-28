@@ -4,12 +4,14 @@ import { PublicBookPage } from "./public-book";
 import { PublicBookSuccessPage } from "./public-book-success";
 import { PublicPaySuccessPage } from "./public-pay-success";
 import { PublicPayCancelledPage } from "./public-pay-cancelled";
+import { PublicPayAppointmentPage } from "./public-pay-appointment";
 import { PublicOfferPage } from "./public-offer";
 import { PublicAnytimePage } from "./public-anytime";
 import "./styles.css";
 
 const paySuccessMatch = /^\/pay\/success\/?$/.exec(window.location.pathname);
 const payCancelledMatch = /^\/pay\/cancelled\/?$/.exec(window.location.pathname);
+const payTokenMatch = /^\/pay\/([^/]+)\/?$/.exec(window.location.pathname);
 const anytimeServiceMatch = /^\/anytime\/([^/]+)\/?$/.exec(window.location.pathname);
 const anytimeMatch = /^\/anytime\/?$/.exec(window.location.pathname);
 const bookSuccessMatch = /^\/book\/([^/]+)\/success\/?$/.exec(window.location.pathname);
@@ -20,6 +22,8 @@ if (paySuccessMatch) {
   render(<PublicPaySuccessPage />, document.getElementById("app")!);
 } else if (payCancelledMatch) {
   render(<PublicPayCancelledPage />, document.getElementById("app")!);
+} else if (payTokenMatch) {
+  render(<PublicPayAppointmentPage token={payTokenMatch[1]} />, document.getElementById("app")!);
 } else if (anytimeServiceMatch) {
   render(<PublicAnytimePage serviceSlug={decodeURIComponent(anytimeServiceMatch[1])} />, document.getElementById("app")!);
 } else if (anytimeMatch) {

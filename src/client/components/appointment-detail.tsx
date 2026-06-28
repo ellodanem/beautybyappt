@@ -97,7 +97,7 @@ export function AppointmentDetail() {
   const previewDeposit = depositOverridden ? parseAmount(customDeposit) : autoDeposit;
   const previewPaid = parseAmount(amountPaid);
   const previewBalance = appointmentBalance(previewTotal, previewPaid);
-  const paymentLinkUrl = lastPaymentLinkUrl ?? apt.pending_payment?.checkout_url ?? null;
+  const paymentLinkUrl = lastPaymentLinkUrl ?? apt.pending_payment?.page_url ?? apt.pending_payment?.checkout_url ?? null;
 
   const paymentPreview: Appointment = {
     ...apt,
@@ -172,9 +172,9 @@ export function AppointmentDetail() {
     setError(null);
     try {
       const res = await sendAppointmentPaymentLink(apt.id);
-      setLastPaymentLinkUrl(res.checkout_url);
+      setLastPaymentLinkUrl(res.page_url);
       try {
-        await navigator.clipboard.writeText(res.checkout_url);
+        await navigator.clipboard.writeText(res.page_url);
         setPaymentLinkCopied(true);
         window.setTimeout(() => setPaymentLinkCopied(false), 3000);
       } catch {
@@ -299,7 +299,7 @@ export function AppointmentDetail() {
               {apt.pending_payment && previewBalance > 0 && (
                 <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                   <p>
-                    Pending Stripe link for {formatMoney(apt.pending_payment.amount, apt.pending_payment.currency || currency)}.
+                    Payment link sent — client can choose deposit or pay in full on the booking page.
                     Sending a new link will replace the previous one.
                   </p>
                   {paymentLinkUrl ? (
