@@ -97,6 +97,7 @@ export function AppointmentDetail() {
   const previewDeposit = depositOverridden ? parseAmount(customDeposit) : autoDeposit;
   const previewPaid = parseAmount(amountPaid);
   const previewBalance = appointmentBalance(previewTotal, previewPaid);
+  const paymentLinkUrl = lastPaymentLinkUrl ?? apt.pending_payment?.checkout_url ?? null;
 
   const paymentPreview: Appointment = {
     ...apt,
@@ -172,8 +173,13 @@ export function AppointmentDetail() {
     try {
       const res = await sendAppointmentPaymentLink(apt.id);
       setLastPaymentLinkUrl(res.checkout_url);
-      setPaymentLinkCopied(true);
-      window.setTimeout(() => setPaymentLinkCopied(false), 2500);
+      try {
+        await navigator.clipboard.writeText(res.checkout_url);
+        setPaymentLinkCopied(true);
+        window.setTimeout(() => setPaymentLinkCopied(false), 3000);
+      } catch {
+        setPaymentLinkCopied(false);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -182,13 +188,14 @@ export function AppointmentDetail() {
   };
 
   const handleCopyPaymentLink = async () => {
-    if (!lastPaymentLinkUrl) return;
+    const url = paymentLinkUrl;
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(lastPaymentLinkUrl);
+      await navigator.clipboard.writeText(url);
       setPaymentLinkCopied(true);
-      window.setTimeout(() => setPaymentLinkCopied(false), 2500);
+      window.setTimeout(() => setPaymentLinkCopied(false), 3000);
     } catch {
-      setError("Could not copy to clipboard");
+      setError("Could not copy to clipboard — select the link below and copy manually.");
     }
   };
 
@@ -290,9 +297,32 @@ export function AppointmentDetail() {
                 Send a Stripe payment link for the balance due, or record cash and transfer payments manually below.
               </p>
               {apt.pending_payment && previewBalance > 0 && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                  Pending Stripe link for {formatMoney(apt.pending_payment.amount, apt.pending_payment.currency || currency)}.
-                  Sending a new link will replace the previous one.
+                <div className="space-y-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                  <p>
+                    Pending Stripe link for {formatMoney(apt.pending_payment.amount, apt.pending_payment.currency || currency)}.
+                    Sending a new link will replace the previous one.
+                  </p>
+                  {paymentLinkUrl ? (
+                    <div className="space-y-2">
+                      <Label className="text-xs text-amber-900/80">Payment link — share with client</Label>
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <Input
+                          readOnly
+                          value={paymentLinkUrl}
+                          className="h-9 bg-white text-xs text-foreground"
+                          onFocus={(e) => (e.target as HTMLInputElement).select()}
+                        />
+                        <Button type="button" size="sm" variant="outline" className="shrink-0 bg-white" onClick={handleCopyPaymentLink}>
+                          {paymentLinkCopied ? (
+                            <Check className="mr-1 h-3.5 w-3.5 text-emerald-600" />
+                          ) : (
+                            <Copy className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          {paymentLinkCopied ? "Copied" : "Copy link"}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
               <div className="grid gap-4 sm:grid-cols-3">
@@ -397,23 +427,13 @@ export function AppointmentDetail() {
                   title={paymentLinkDisabledReason ?? undefined}
                 >
                   <Send className="mr-1 h-3.5 w-3.5" />
-                  {paymentLinkSending ? "Creating…" : "Send payment link"}
+                  {paymentLinkSending ? "Creating…" : paymentLinkUrl ? "New payment link" : "Send payment link"}
                 </Button>
-                {lastPaymentLinkUrl && (
-                  <Button size="sm" variant="ghost" onClick={handleCopyPaymentLink}>
-                    {paymentLinkCopied ? (
-                      <Check className="mr-1 h-3.5 w-3.5 text-emerald-600" />
-                    ) : (
-                      <Copy className="mr-1 h-3.5 w-3.5" />
-                    )}
-                    {paymentLinkCopied ? "Copied" : "Copy link"}
-                  </Button>
+                {paymentLinkCopied && !paymentLinkSending && (
+                  <span className="text-sm text-emerald-600">Link copied</span>
                 )}
                 {paymentSaved && !paymentDirty && (
                   <span className="text-sm text-emerald-600">Saved</span>
-                )}
-                {paymentLinkCopied && !paymentLinkSending && (
-                  <span className="text-sm text-emerald-600">Link copied</span>
                 )}
               </div>
             </CardContent>

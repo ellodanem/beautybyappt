@@ -73,6 +73,27 @@ export function appointmentBalance(total: number, amountPaid: number): number {
   return Math.max(0, total - amountPaid);
 }
 
+export function appointmentHasPaymentChoice(apt: {
+  total_price: number;
+  deposit_amount: number;
+  amount_paid: number;
+}): boolean {
+  if ((apt.amount_paid ?? 0) > 0) return false;
+  const balance = appointmentBalance(apt.total_price, apt.amount_paid ?? 0);
+  const deposit = apt.deposit_amount ?? 0;
+  return deposit > 0 && deposit < balance - 0.009;
+}
+
+export function appointmentCheckoutAmount(
+  apt: { total_price: number; deposit_amount: number; amount_paid: number },
+  choice: PaymentChoice,
+): number {
+  const balance = appointmentBalance(apt.total_price, apt.amount_paid ?? 0);
+  if (choice === "full") return balance;
+  if ((apt.amount_paid ?? 0) > 0) return balance;
+  return Math.min(apt.deposit_amount ?? 0, balance);
+}
+
 export function derivePaymentStatus(
   total: number,
   deposit: number,

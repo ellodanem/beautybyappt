@@ -254,6 +254,7 @@ CREATE TABLE IF NOT EXISTS payments (
   booking_link_id INTEGER REFERENCES booking_links(id) ON DELETE SET NULL,
   stripe_checkout_session_id TEXT,
   stripe_payment_intent_id TEXT,
+  link_token TEXT,
   amount REAL NOT NULL,
   currency TEXT NOT NULL DEFAULT 'USD',
   type TEXT NOT NULL,
@@ -264,6 +265,7 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE INDEX IF NOT EXISTS idx_payments_appointment ON payments(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_booking_link ON payments(booking_link_id);
 CREATE INDEX IF NOT EXISTS idx_payments_stripe_session ON payments(stripe_checkout_session_id);
+CREATE INDEX IF NOT EXISTS idx_payments_link_token ON payments(link_token);
 
 CREATE TABLE IF NOT EXISTS notification_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

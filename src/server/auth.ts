@@ -3,7 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { MiddlewareHandler } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { sign, verify } from "hono/jwt";
-import { runtimeEnv } from "./runtime-env.js";
+import { bindingString } from "./runtime-env.js";
 
 export type AuthEnv = {
   ADMIN_PASSWORD?: string;
@@ -24,13 +24,26 @@ const PUBLIC_API_PREFIXES = [
   "/api/anytime/public",
   "/api/offer/public/",
   "/api/public/",
+  "/api/pay/public/",
   "/api/payments/complete",
   "/api/webhooks/stripe",
   "/api/cron/reminders",
 ];
 
+function readAuthEnv(c: { env: unknown }): AuthEnv {
+  const bindings = (c.env ?? {}) as Record<string, unknown>;
+  return {
+    ADMIN_PASSWORD: bindingString(bindings, "ADMIN_PASSWORD"),
+    SESSION_SECRET: bindingString(bindings, "SESSION_SECRET"),
+  };
+}
+
+function normalizePassword(value: string): string {
+  return value.trim();
+}
+
 export function isAuthConfigured(env: AuthEnv): boolean {
-  return Boolean(env.ADMIN_PASSWORD);
+  return Boolean(env.ADMIN_PASSWORD && normalizePassword(env.ADMIN_PASSWORD));
 }
 
 function sessionSecret(env: AuthEnv): string {
@@ -51,7 +64,9 @@ function timingSafeEqual(a: string, b: string): boolean {
   return result === 0;
 }
 
-function cookieSecure(c: { req: { url: string } }): boolean {
+function cookieSecure(c: { req: { url: string; header: (name: string) => string | undefined } }): boolean {
+  const forwarded = c.req.header("x-forwarded-proto");
+  if (forwarded?.split(",")[0]?.trim().toLowerCase() === "https") return true;
   try {
     return new URL(c.req.url).protocol === "https:";
   } catch {
@@ -66,7 +81,7 @@ async function createSessionToken(env: AuthEnv): Promise<string> {
 
 async function verifySessionToken(token: string, env: AuthEnv): Promise<boolean> {
   try {
-    const payload = await verify(token, sessionSecret(env));
+    const payload = await verify(token, sessionSecret(env), "HS256");
     return payload.sub === "admin";
   } catch {
     return false;
@@ -81,7 +96,7 @@ export function createAuthMiddleware(): MiddlewareHandler {
       return;
     }
 
-    const env = runtimeEnv(c.env) as AuthEnv;
+    const env = readAuthEnv(c);
     if (!isAuthConfigured(env)) {
       return c.json({ error: "ADMIN_PASSWORD is not configured" }, 503);
     }
@@ -114,7 +129,7 @@ export function registerAuthRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(getMe, async (c) => {
-    const env = runtimeEnv(c.env) as AuthEnv;
+    const env = readAuthEnv(c);
     const configured = isAuthConfigured(env);
     if (!configured) {
       return c.json({ authenticated: false, configured: false }, 200);
@@ -154,13 +169,15 @@ export function registerAuthRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(login, async (c) => {
-    const env = runtimeEnv(c.env) as AuthEnv;
+    const env = readAuthEnv(c);
     if (!isAuthConfigured(env)) {
       return c.json({ error: "ADMIN_PASSWORD is not configured" }, 503);
     }
 
     const { password } = c.req.valid("json");
-    if (!timingSafeEqual(password, env.ADMIN_PASSWORD!)) {
+    const expected = normalizePassword(env.ADMIN_PASSWORD!);
+    const provided = normalizePassword(password);
+    if (!timingSafeEqual(provided, expected)) {
       return c.json({ error: "Invalid password" }, 401);
     }
 

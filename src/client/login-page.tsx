@@ -26,9 +26,20 @@ export function LoginPage({
     setSubmitting(true);
     try {
       await api("POST", "/api/auth/login", { password });
+      const me = await api<{ authenticated: boolean; configured: boolean }>("GET", "/api/auth/me");
+      if (!me.authenticated) {
+        throw new Error(
+          "Sign-in succeeded but the session could not be verified. If this persists after a refresh, check that SESSION_SECRET matches in Cloudflare (Workers → beautybyappt → Settings → Variables and Secrets).",
+        );
+      }
       onSuccess();
     } catch (err) {
-      setError((err as Error).message || "Login failed");
+      const message = (err as Error).message || "Login failed";
+      setError(
+        message === "Invalid password"
+          ? "Invalid password. If you recently changed it in Cloudflare, use the exact value from Workers → beautybyappt → Settings → Variables and Secrets (secret name must be ADMIN_PASSWORD)."
+          : message,
+      );
     } finally {
       setSubmitting(false);
     }

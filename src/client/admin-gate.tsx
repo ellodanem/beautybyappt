@@ -13,7 +13,9 @@ export function AdminGate() {
     api<{ authenticated: boolean; configured: boolean }>("GET", "/api/auth/me")
       .then((result) => {
         if (!result.configured) {
-          setConfiguredError("Admin password is not configured on the server. Set ADMIN_PASSWORD in your environment.");
+          setConfiguredError(
+            "Admin password is not configured on the server. In Cloudflare, add a secret named ADMIN_PASSWORD (Workers → beautybyappt → Settings → Variables and Secrets).",
+          );
         }
         setState(result.authenticated ? "app" : "login");
       })

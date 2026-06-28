@@ -162,6 +162,7 @@ const AppointmentSchema = z.object({
     amount: z.number(),
     currency: z.string(),
     created_at: z.string(),
+    checkout_url: z.string().nullable().optional(),
   }).nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -475,7 +476,10 @@ app.openapi(getAppointment, async (c) => {
     );
   }
 
-  const pendingPayment = await loadPendingPaymentSummary(parseInt(String(id), 10));
+  const pendingPayment = await loadPendingPaymentSummary(
+    parseInt(String(id), 10),
+    runtimeEnv(c.env) as { STRIPE_SECRET_KEY?: string },
+  );
   apt.pending_payment = pendingPayment ?? null;
 
   return c.json({ appointment: apt }, 200);

@@ -31,4 +31,10 @@ export async function ensureSqliteSchema(): Promise<void> {
       }
     }
   }
+
+  const paymentCols = await query<{ name: string }>("PRAGMA table_info(payments)");
+  if (paymentCols.length > 0 && !paymentCols.some((c) => c.name === "link_token")) {
+    await run("ALTER TABLE payments ADD COLUMN link_token TEXT");
+    await run("CREATE INDEX IF NOT EXISTS idx_payments_link_token ON payments(link_token)");
+  }
 }

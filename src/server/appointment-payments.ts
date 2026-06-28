@@ -6,23 +6,109 @@ import {
   appBaseUrl,
   createCheckoutSession,
   expireCheckoutSession,
+  isStripeConfigured,
   paymentIntentId,
   retrieveCheckoutSession,
   type StripeEnv,
 } from "./stripe.js";
 import { isStripePaymentsActive } from "./stripe-payments-settings.js";
-import { appointmentBalance, derivePaymentStatus } from "../shared/payment.js";
+import {
+  appointmentBalance,
+  appointmentCheckoutAmount,
+  appointmentHasPaymentChoice,
+  derivePaymentStatus,
+  type PaymentChoice,
+} from "../shared/payment.js";
+import { formatMoney } from "../shared/currency.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
+import { generateBookingToken } from "./helpers.js";
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("AppointmentPaymentError");
 
 const IdParam = z.object({ id: z.string().openapi({ param: { name: "id", in: "path" } }) });
 
 const STRIPE_MIN_USD = 0.5;
+const STRIPE_TEXT_LIMIT = 500;
 
 function minChargeAmount(currency: string): number {
   if (currency.toUpperCase() === "USD") return STRIPE_MIN_USD;
   return STRIPE_MIN_USD;
+}
+
+function truncateStripeText(value: string, max = STRIPE_TEXT_LIMIT): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function formatCheckoutDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return d.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatCheckoutTime(timeStr: string): string {
+  const [h, m] = timeStr.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+function appointmentCheckoutCopy(
+  apt: {
+    identifier: string;
+    total_price: number;
+    scheduled_date: string;
+    start_time: string;
+    end_time: string;
+    client_name: string | null;
+    staff_name: string | null;
+    offering_name: string | null;
+    service_name: string | null;
+  },
+  amountPaid: number,
+  balance: number,
+  amount: number,
+  currency: string,
+): { name: string; description: string; submitMessage: string } {
+  const serviceLabel = apt.offering_name || apt.service_name || "Appointment";
+  const clientLabel = apt.client_name?.trim() || "Client";
+  const isDeposit = amountPaid <= 0 && balance < apt.total_price - 0.009;
+  const paymentLabel = amountPaid > 0 ? "Balance payment" : isDeposit ? "Deposit" : "Payment";
+  const dateTime = `${formatCheckoutDate(apt.scheduled_date)}, ${formatCheckoutTime(apt.start_time)} – ${formatCheckoutTime(apt.end_time)}`;
+  const amountDue = formatMoney(amount, currency);
+  const totalBooking = formatMoney(apt.total_price, currency);
+
+  // Product name is the largest text on Stripe Checkout — lead with service + client.
+  const name = truncateStripeText(`${serviceLabel} — ${clientLabel}`, 250);
+
+  const description = truncateStripeText([
+    dateTime,
+    apt.identifier,
+    apt.staff_name ? `Artist: ${apt.staff_name}` : null,
+    paymentLabel,
+  ].filter(Boolean).join("\n"));
+
+  const submitLines = [
+    `${apt.identifier} · ${paymentLabel}`,
+    dateTime,
+    apt.staff_name ? `Artist: ${apt.staff_name}` : null,
+    "",
+    amountPaid > 0
+      ? `Book now: ${amountDue} (${totalBooking} total booking)`
+      : isDeposit
+        ? `Book with ${amountDue} deposit (${totalBooking} total booking)`
+        : `Book now: ${amountDue}`,
+  ].filter((line): line is string => line !== null);
+
+  return {
+    name,
+    description,
+    submitMessage: truncateStripeText(submitLines.join("\n"), 1200),
+  };
 }
 
 function resolvePaymentType(
@@ -45,13 +131,36 @@ export async function loadPendingAppointmentPayments(appointmentId: number) {
   );
 }
 
-export async function loadPendingPaymentSummary(appointmentId: number) {
-  return get<{ amount: number; currency: string; created_at: string }>(
-    `SELECT amount, currency, created_at FROM payments
+export async function loadPendingPaymentSummary(appointmentId: number, env?: StripeEnv) {
+  const row = await get<{
+    amount: number;
+    currency: string;
+    created_at: string;
+    stripe_checkout_session_id: string | null;
+  }>(
+    `SELECT amount, currency, created_at, stripe_checkout_session_id FROM payments
      WHERE appointment_id = ? AND status = 'pending'
      ORDER BY created_at DESC LIMIT 1`,
     [appointmentId],
   );
+  if (!row) return null;
+
+  let checkout_url: string | null = null;
+  if (env && row.stripe_checkout_session_id && isStripeConfigured(env)) {
+    try {
+      const session = await retrieveCheckoutSession(env, row.stripe_checkout_session_id);
+      checkout_url = session.url;
+    } catch {
+      checkout_url = null;
+    }
+  }
+
+  return {
+    amount: row.amount,
+    currency: row.currency,
+    created_at: row.created_at,
+    checkout_url,
+  };
 }
 
 export async function expirePendingAppointmentPayments(
@@ -83,9 +192,27 @@ export async function createAppointmentPaymentLink(
     currency: string | null;
     scheduled_date: string;
     start_time: string;
+    end_time: string;
+    client_name: string | null;
+    client_email: string | null;
+    staff_name: string | null;
+    offering_name: string | null;
+    service_name: string | null;
   }>(
-    `SELECT identifier, total_price, amount_paid, currency, scheduled_date, start_time
-     FROM appointments WHERE id = ?`,
+    `SELECT a.identifier, a.total_price, a.amount_paid, a.currency, a.scheduled_date, a.start_time, a.end_time,
+            cl.name as client_name, cl.email as client_email,
+            s.name as staff_name,
+            o.name as offering_name,
+            (SELECT sv.name FROM appointment_services aps
+             JOIN services sv ON sv.id = aps.service_id
+             WHERE aps.appointment_id = a.id
+             ORDER BY aps.id LIMIT 1) as service_name
+     FROM appointments a
+     LEFT JOIN clients cl ON cl.id = a.client_id
+     LEFT JOIN staff s ON s.id = a.staff_id
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     LEFT JOIN offerings o ON o.id = si.offering_id
+     WHERE a.id = ?`,
     [appointmentId],
   );
   if (!apt) throw new Error("Appointment not found");
@@ -107,17 +234,19 @@ export async function createAppointmentPaymentLink(
 
   const amount = Math.round(balance * 100) / 100;
   const base = appBaseUrl(env, requestUrl);
-  const lineName = amountPaid > 0 ? "Appointment balance" : "Appointment payment";
+  const checkoutCopy = appointmentCheckoutCopy(apt, amountPaid, balance, amount, currency);
 
   const session = await createCheckoutSession(env, {
     currency,
     lineItems: [{
-      name: lineName,
-      description: `${apt.identifier} · ${apt.scheduled_date} ${apt.start_time}`,
+      name: checkoutCopy.name,
+      description: checkoutCopy.description,
       amount,
     }],
     successUrl: `${base}/pay/success?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}/pay/cancelled`,
+    customerEmail: apt.client_email ?? undefined,
+    submitMessage: checkoutCopy.submitMessage,
     metadata: {
       type: "appointment_payment",
       appointment_id: String(appointmentId),

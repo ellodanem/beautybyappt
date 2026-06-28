@@ -33,8 +33,8 @@ export function currencyOptions() {
   return SUPPORTED_CURRENCIES.map((c) => ({ value: c.code, label: `${c.code} - ${c.label}` }));
 }
 
-/** Fixed peg: East Caribbean Dollar per US Dollar. */
-export const USD_TO_XCD_RATE = 2.7;
+/** USD to XCD conversion (matches Stripe / bank settlement rate). */
+export const USD_TO_XCD_RATE = 2.7890;
 
 export function getPairedCurrency(currencyCode: string): CurrencyCode | null {
   if (currencyCode === "USD") return "XCD";

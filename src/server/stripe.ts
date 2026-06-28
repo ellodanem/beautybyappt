@@ -83,6 +83,9 @@ export async function createCheckoutSession(
     successUrl: string;
     cancelUrl: string;
     metadata: Record<string, string>;
+    customerEmail?: string;
+    submitMessage?: string;
+    submitButtonLabel?: string;
   },
 ): Promise<StripeCheckoutSession> {
   if (opts.lineItems.length === 0) throw new Error("At least one line item is required");
@@ -93,6 +96,18 @@ export async function createCheckoutSession(
     success_url: opts.successUrl,
     cancel_url: opts.cancelUrl,
   };
+
+  if (opts.customerEmail?.trim()) {
+    params.customer_email = opts.customerEmail.trim();
+  }
+
+  if (opts.submitMessage?.trim()) {
+    params["custom_text[submit][message]"] = opts.submitMessage.trim();
+  }
+
+  if (opts.submitButtonLabel?.trim()) {
+    params["custom_text[submit][button]"] = opts.submitButtonLabel.trim();
+  }
 
   opts.lineItems.forEach((item, index) => {
     params[`line_items[${index}][quantity]`] = "1";

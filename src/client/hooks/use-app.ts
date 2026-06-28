@@ -530,7 +530,6 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       amount: number;
       currency: string;
     }>("POST", `/api/appointments/${id}/payment-link`);
-    await navigator.clipboard.writeText(res.checkout_url);
     if (selectedAppointment && selectedAppointment.id === id) {
       const aptRes = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
       setSelectedAppointment(aptRes.appointment);
