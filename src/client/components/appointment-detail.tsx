@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { useApp } from "../context";
-import { ArrowLeft, Trash2, Send, Clock, User, Copy, Check } from "lucide-preact";
+import { ArrowLeft, Trash2, Send, Clock, User, Copy, Check, Mail } from "lucide-preact";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,11 @@ function getEffectiveTotal(
 function isCustomDeposit(total: number, deposit: number): boolean {
   if (deposit <= 0) return false;
   return Math.abs(deposit - computeDefaultDeposit(total)) > 0.009;
+}
+
+function paymentLinkShareMessage(url: string, clientName?: string): string {
+  const greeting = clientName?.trim() ? `Hi ${clientName.trim()},` : "Hi,";
+  return `${greeting}\n\nPlease complete your booking payment here:\n${url}`;
 }
 
 export function AppointmentDetail() {
@@ -199,6 +204,25 @@ export function AppointmentDetail() {
     }
   };
 
+  const handleSharePaymentLinkWhatsApp = () => {
+    const url = paymentLinkUrl;
+    if (!url) return;
+    const text = encodeURIComponent(paymentLinkShareMessage(url, apt.client_name));
+    const phone = apt.client_phone?.replace(/\D/g, "");
+    const waUrl = phone
+      ? `https://wa.me/${phone}?text=${text}`
+      : `https://wa.me/?text=${text}`;
+    window.open(waUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const handleSharePaymentLinkEmail = () => {
+    const url = paymentLinkUrl;
+    if (!url) return;
+    const subject = encodeURIComponent(`Payment link for ${apt.identifier}`);
+    const body = encodeURIComponent(paymentLinkShareMessage(url, apt.client_name));
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
   const handleSaveExtras = async () => {
     setExtrasSaving(true);
     setExtrasSaved(false);
@@ -305,21 +329,30 @@ export function AppointmentDetail() {
                   {paymentLinkUrl ? (
                     <div className="space-y-2">
                       <Label className="text-xs text-amber-900/80">Payment link — share with client</Label>
-                      <div className="flex flex-col gap-2 sm:flex-row">
+                      <div className="flex flex-col gap-2">
                         <Input
                           readOnly
                           value={paymentLinkUrl}
                           className="h-9 bg-white text-xs text-foreground"
                           onFocus={(e) => (e.target as HTMLInputElement).select()}
                         />
-                        <Button type="button" size="sm" variant="outline" className="shrink-0 bg-white" onClick={handleCopyPaymentLink}>
-                          {paymentLinkCopied ? (
-                            <Check className="mr-1 h-3.5 w-3.5 text-emerald-600" />
-                          ) : (
-                            <Copy className="mr-1 h-3.5 w-3.5" />
-                          )}
-                          {paymentLinkCopied ? "Copied" : "Copy link"}
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" size="sm" variant="outline" className="shrink-0 bg-white" onClick={handleCopyPaymentLink}>
+                            {paymentLinkCopied ? (
+                              <Check className="mr-1 h-3.5 w-3.5 text-emerald-600" />
+                            ) : (
+                              <Copy className="mr-1 h-3.5 w-3.5" />
+                            )}
+                            {paymentLinkCopied ? "Copied" : "Copy link"}
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" className="shrink-0 bg-white" onClick={handleSharePaymentLinkWhatsApp}>
+                            WhatsApp
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" className="shrink-0 bg-white" onClick={handleSharePaymentLinkEmail}>
+                            <Mail className="mr-1 h-3.5 w-3.5" />
+                            Email
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ) : null}
