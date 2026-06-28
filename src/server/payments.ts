@@ -7,6 +7,10 @@ import {
   isBookingLinkCheckoutMetadata,
   isOfferingCheckoutMetadata,
 } from "./offering-payments.js";
+import {
+  finalizeAnytimeBookingCheckout,
+  isAnytimeCheckoutMetadata,
+} from "./anytime-payments.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 import { runtimeEnv } from "./runtime-env.js";
 import {
@@ -62,6 +66,15 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
           }
         } catch (err) {
           console.error("Offering checkout webhook failed:", (err as Error).message);
+        }
+      } else if (isAnytimeCheckoutMetadata(metaType) && session.id) {
+        try {
+          const result = await finalizeAnytimeBookingCheckout(env, session.id);
+          if (!result.already_done) {
+            scheduleBookingConfirmation(c, result.appointment_id!, { receipt: true });
+          }
+        } catch (err) {
+          console.error("Anytime checkout webhook failed:", (err as Error).message);
         }
       }
     }

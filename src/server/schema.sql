@@ -386,6 +386,32 @@ CREATE INDEX IF NOT EXISTS idx_offering_checkouts_slot ON offering_booking_check
 CREATE INDEX IF NOT EXISTS idx_offering_checkouts_session ON offering_booking_checkouts(stripe_checkout_session_id);
 CREATE INDEX IF NOT EXISTS idx_offering_checkouts_status ON offering_booking_checkouts(status);
 
+CREATE TABLE IF NOT EXISTS anytime_booking_checkouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  service_slug TEXT NOT NULL DEFAULT '',
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  scheduled_date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+  addon_ids TEXT NOT NULL DEFAULT '[]',
+  notes TEXT NOT NULL DEFAULT '',
+  total_price REAL NOT NULL,
+  deposit_amount REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  payment_choice TEXT NOT NULL DEFAULT 'full',
+  stripe_checkout_session_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  expires_at TEXT NOT NULL,
+  appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_anytime_checkouts_date ON anytime_booking_checkouts(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_anytime_checkouts_session ON anytime_booking_checkouts(stripe_checkout_session_id);
+CREATE INDEX IF NOT EXISTS idx_anytime_checkouts_status ON anytime_booking_checkouts(status);
+
 CREATE INDEX IF NOT EXISTS idx_appointments_offering_slot ON appointments(offering_slot_instance_id);
 CREATE INDEX IF NOT EXISTS idx_service_addons_service ON service_addons(service_id);
 CREATE INDEX IF NOT EXISTS idx_appointment_service_addons_appointment ON appointment_service_addons(appointment_id);

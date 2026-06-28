@@ -1021,6 +1021,7 @@ Client-facing UI     → business name + logo (H) on links, offerings, emails
 | Email / reminders | None |
 | Google Calendar sync | None |
 | Offering Stripe checkout (C2) | ✅ Local |
+| Anytime service Stripe checkout | ✅ Local |
 | Travel fee | None |
 | Business branding | Generic "Salon Manager" sidebar; no settings |
 | Client `address` | Not in schema |
@@ -1265,6 +1266,7 @@ Phase 3  → Evaluate native app only after real usage data
 | 2026-06-26 | Feature B added: seasonal bookable offerings (Carnival scenario), wizard, slots, capacity, add-ons, go-live calendar behavior. |
 | 2026-06-26 | Features C–G added: Stripe (unified), email, reminders, Google Calendar sync, optional travel fee. Build order updated. |
 | 2026-06-26 | Feature H added: logo and business name customization (staff app, public pages, email, Stripe). |
+| 2026-06-28 | **Anytime Stripe:** deposit/full pay on `/anytime` public booking, 15-min slot hold, success page. |
 | 2026-06-28 | **C2 implemented:** Stripe deposit/full pay on public offering bookings, 15-min slot hold, success page. |
 | 2026-06-26 | **A1 implemented:** booking links API, public `/book/:token` page, calendar “Booking link” UI, Neon migrations folder. |
 | 2026-06-26 | **H1 implemented:** branding settings API, Settings UI, sidebar branding, public branding on `/book/:token`. Stripe: single test account for C1; Connect deferred to SaaS. |

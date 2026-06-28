@@ -8,11 +8,14 @@ import { PublicPayAppointmentPage } from "./public-pay-appointment";
 import { PublicOfferPage } from "./public-offer";
 import { PublicOfferSuccessPage } from "./public-offer-success";
 import { PublicAnytimePage } from "./public-anytime";
+import { PublicAnytimeSuccessPage } from "./public-anytime-success";
 import "./styles.css";
 
 const paySuccessMatch = /^\/pay\/success\/?$/.exec(window.location.pathname);
 const payCancelledMatch = /^\/pay\/cancelled\/?$/.exec(window.location.pathname);
 const payTokenMatch = /^\/pay\/([^/]+)\/?$/.exec(window.location.pathname);
+const anytimeSuccessMatch = /^\/anytime\/success\/?$/.exec(window.location.pathname);
+const anytimeServiceSuccessMatch = /^\/anytime\/([^/]+)\/success\/?$/.exec(window.location.pathname);
 const anytimeServiceMatch = /^\/anytime\/([^/]+)\/?$/.exec(window.location.pathname);
 const anytimeMatch = /^\/anytime\/?$/.exec(window.location.pathname);
 const bookSuccessMatch = /^\/book\/([^/]+)\/success\/?$/.exec(window.location.pathname);
@@ -26,6 +29,13 @@ if (paySuccessMatch) {
   render(<PublicPayCancelledPage />, document.getElementById("app")!);
 } else if (payTokenMatch) {
   render(<PublicPayAppointmentPage token={payTokenMatch[1]} />, document.getElementById("app")!);
+} else if (anytimeSuccessMatch) {
+  render(<PublicAnytimeSuccessPage />, document.getElementById("app")!);
+} else if (anytimeServiceSuccessMatch) {
+  render(
+    <PublicAnytimeSuccessPage serviceSlug={decodeURIComponent(anytimeServiceSuccessMatch[1])} />,
+    document.getElementById("app")!,
+  );
 } else if (anytimeServiceMatch) {
   render(<PublicAnytimePage serviceSlug={decodeURIComponent(anytimeServiceMatch[1])} />, document.getElementById("app")!);
 } else if (anytimeMatch) {

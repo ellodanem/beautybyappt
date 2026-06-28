@@ -16,6 +16,14 @@ import { cn } from "@/lib/utils";
 
 import { formatMoney } from "../shared/currency";
 import { addMinutes } from "../shared/offerings";
+import {
+  appointmentBalance,
+  offeringCheckoutAmount,
+  offeringClientHasPaymentChoice,
+  resolveOfferingDeposit,
+  type PaymentChoice,
+} from "../shared/payment";
+import { parseRequiredBookingEmail } from "../shared/email";
 
 import { formatDateLong, formatTimeRange } from "@/lib/public-booking-utils";
 
@@ -26,6 +34,8 @@ import { PublicPageShell } from "./components/public-page-shell";
 import { PublicBookingTopBar } from "./components/public-booking-top-bar";
 
 import { PublicBookingSummary } from "./components/public-booking-summary";
+
+import { PublicServiceDetails } from "./components/public-service-details";
 
 import { PublicTimeSlotPicker } from "./components/public-time-slot-picker";
 
@@ -89,6 +99,8 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
+  const [stripeEnabled, setStripeEnabled] = useState(false);
+  const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>("full");
 
   const publicPage = usePublicBranding();
 
@@ -142,6 +154,15 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cancelled") === "1") {
+      setError("Payment was cancelled — your spot is not reserved yet. You can try again.");
+    }
+  }, []);
+
+
+
+  useEffect(() => {
 
     const endpoint = serviceSlug
 
@@ -161,6 +182,8 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
       dates: string[];
 
+      stripe_enabled: boolean;
+
     }>("GET", endpoint)
 
       .then((data) => {
@@ -172,6 +195,8 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
         setCurrency(data.currency);
 
         setDates(data.dates);
+
+        setStripeEnabled(data.stripe_enabled);
 
         if (list.length === 1) setSelectedServiceId(list[0].id);
 
@@ -333,7 +358,15 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
     }
 
+    const emailCheck = parseRequiredBookingEmail(email);
 
+    if (!emailCheck.ok) {
+
+      setError(emailCheck.error);
+
+      return;
+
+    }
 
     setSubmitting(true);
 
@@ -343,7 +376,11 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
       const res = await api<{
 
-        appointment: {
+        requires_payment?: boolean;
+
+        checkout_url?: string;
+
+        appointment?: {
 
           identifier: string;
 
@@ -371,16 +408,31 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
         phone: phone.trim(),
 
-        email: email.trim(),
+        email: emailCheck.email,
 
         address: address.trim(),
 
         notes: notes.trim(),
+
         addon_ids: selectedAddonIds,
+
+        payment_choice: paymentChoice,
 
       });
 
-      setConfirmed(res.appointment);
+      if (res.requires_payment && res.checkout_url) {
+
+        window.location.href = res.checkout_url;
+
+        return;
+
+      }
+
+      if (res.appointment) {
+
+        setConfirmed(res.appointment);
+
+      }
 
     } catch (err) {
 
@@ -500,16 +552,36 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
 
 
-  const pageTitle = serviceSlug && selectedService ? selectedService.name : "Book an appointment";
+  const pageTitle = (serviceSlug || services.length === 1) && selectedService
+    ? selectedService.name
+    : "Book an appointment";
 
-  const pageDescription = serviceSlug && selectedService?.description
-
+  const pageDescription = (serviceSlug || services.length === 1) && selectedService?.description?.trim()
     ? selectedService.description
-
     : "Pick a service, day, and time that works for you.";
 
+  const depositAmount = resolveOfferingDeposit(bookingTotal);
+
+  const clientPaymentChoice = offeringClientHasPaymentChoice(bookingTotal, depositAmount);
+
+  const checkoutTotal = offeringCheckoutAmount(bookingTotal, depositAmount, paymentChoice);
+
+  const depositCheckoutTotal = offeringCheckoutAmount(bookingTotal, depositAmount, "deposit");
+
+  const fullCheckoutTotal = offeringCheckoutAmount(bookingTotal, depositAmount, "full");
+
+  const balanceDue = paymentChoice === "deposit"
+    ? appointmentBalance(bookingTotal, checkoutTotal)
+    : 0;
+
+  const stripeCheckout = stripeEnabled && bookingTotal > 0;
+
+  const submitLabel = stripeCheckout
+    ? (submitting ? "Redirecting…" : `Pay ${formatMoney(checkoutTotal, currency)}`)
+    : (submitting ? "Booking…" : "Book appointment");
+
   const summaryAction = detailsInView
-    ? { label: "Book appointment", formId: BOOKING_FORM_ID, loading: submitting }
+    ? { label: submitLabel, formId: BOOKING_FORM_ID, loading: submitting }
     : { label: "Continue", onClick: scrollToDetails, disabled: !selectedSlot };
 
   return (
@@ -523,6 +595,18 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
       <div className="mx-auto max-w-5xl px-4 pt-6">
 
         <div className="mb-6 max-w-2xl">
+
+          {(serviceSlug || services.length === 1) && selectedService?.category && (
+            <div className="mb-2 flex items-center gap-2">
+              <span
+                className="h-3 w-3 shrink-0 rounded-full"
+                style={{ backgroundColor: selectedService.color }}
+              />
+              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {selectedService.category}
+              </span>
+            </div>
+          )}
 
           <h1 className="text-2xl font-bold tracking-tight">{pageTitle}</h1>
 
@@ -583,6 +667,19 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
               ))}
 
             </div>
+
+            {selectedService && (
+              <PublicServiceDetails
+                className="mt-3"
+                name={selectedService.name}
+                description={selectedService.description}
+                category={selectedService.category}
+                duration={selectedService.duration}
+                price={selectedService.price}
+                currency={currency}
+                color={selectedService.color}
+              />
+            )}
 
           </div>
 
@@ -729,7 +826,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
                         <div className="space-y-1.5">
 
-                          <Label htmlFor="email">Email</Label>
+                          <Label htmlFor="email">Email *</Label>
 
                           <Input
 
@@ -787,6 +884,52 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
                         </div>
 
+                        {bookingTotal > 0 && clientPaymentChoice && (
+                          <div className="space-y-2 rounded-md border p-3">
+                            <p className="text-sm font-medium">Payment</p>
+                            <label className="flex cursor-pointer items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="payment_choice"
+                                checked={paymentChoice === "full"}
+                                onChange={() => setPaymentChoice("full")}
+                              />
+                              <span>
+                                <span className="font-medium">Pay in full</span>
+                                <span className="block text-muted-foreground">
+                                  {formatMoney(fullCheckoutTotal, currency)} now
+                                </span>
+                              </span>
+                            </label>
+                            <label className="flex cursor-pointer items-start gap-2 text-sm">
+                              <input
+                                type="radio"
+                                name="payment_choice"
+                                checked={paymentChoice === "deposit"}
+                                onChange={() => setPaymentChoice("deposit")}
+                              />
+                              <span>
+                                <span className="font-medium">Pay deposit</span>
+                                <span className="block text-muted-foreground">
+                                  {formatMoney(depositCheckoutTotal, currency)} now
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+                        )}
+
+                        {bookingTotal > 0 && balanceDue > 0 && paymentChoice === "deposit" && (
+                          <p className="text-sm text-muted-foreground">
+                            Balance at appointment: {formatMoney(balanceDue, currency)}
+                          </p>
+                        )}
+
+                        {bookingTotal > 0 && !stripeEnabled && (
+                          <p className="text-sm text-amber-700">
+                            Online payment is not enabled — contact the business to complete your booking.
+                          </p>
+                        )}
+
                         {error && <p className="text-sm text-destructive">{error}</p>}
 
                       </form>
@@ -808,6 +951,8 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
               className="hidden lg:block"
 
               serviceName={selectedService.name}
+
+              serviceDescription={selectedService.description}
 
               durationMinutes={selectedService.duration}
 
@@ -852,7 +997,7 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
                 className="h-11 shrink-0 px-6"
                 disabled={submitting}
               >
-                {submitting ? "Booking…" : "Book appointment"}
+                {submitLabel}
               </Button>
             ) : (
               <Button type="button" className="h-11 shrink-0 px-6" onClick={scrollToDetails}>

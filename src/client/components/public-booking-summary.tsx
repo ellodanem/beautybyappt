@@ -15,6 +15,7 @@ export interface PublicBookingSummaryAction {
 
 interface PublicBookingSummaryProps {
   serviceName: string;
+  serviceDescription?: string;
   durationMinutes?: number;
   serviceColor?: string;
   date?: string | null;
@@ -47,6 +48,7 @@ function SummaryRow({
 
 export function PublicBookingSummary({
   serviceName,
+  serviceDescription,
   durationMinutes,
   serviceColor,
   date,
@@ -78,6 +80,9 @@ export function PublicBookingSummary({
               </span>
             )}
           </div>
+          {serviceDescription?.trim() && (
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{serviceDescription}</p>
+          )}
         </SummaryRow>
 
         <div className="border-t" />
