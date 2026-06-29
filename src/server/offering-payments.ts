@@ -85,8 +85,9 @@ export async function computeOfferingBookingTotal(
   offeringId: number,
   basePrice: number,
   addonIds: number[],
+  allowAddons = 1,
 ): Promise<number> {
-  if (addonIds.length === 0) return basePrice;
+  if (addonIds.length === 0 || !allowAddons) return basePrice;
   const addons = await query<{ price: number }>(
     `SELECT price FROM offering_addons
      WHERE offering_id = ? AND active = 1 AND id IN (${addonIds.map(() => "?").join(",")})`,

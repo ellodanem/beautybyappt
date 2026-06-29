@@ -62,6 +62,7 @@ const OfferingBodySchema = z.object({
   date_windows: z.array(DateWindowSchema).optional(),
   time_slots: z.array(TimeSlotSchema).optional(),
   addons: z.array(AddonSchema).optional(),
+  allow_addons: z.number().int().optional(),
   confirm_price_changes: z.boolean().optional(),
   currency: z.string().optional(),
 });
@@ -81,6 +82,7 @@ type OfferingRow = {
   staff_ids: string;
   block_regular_bookings: number | null;
   currency: string;
+  allow_addons: number;
   created_at: string;
   updated_at: string;
 };
@@ -100,6 +102,26 @@ function blockRegularFromDb(value: number | null | undefined): boolean | null {
   if (value === 1) return true;
   if (value === 0) return false;
   return null;
+}
+
+function allowAddonsFromBody(body: { allow_addons?: number; addons?: { name: string }[] }): number {
+  if (body.allow_addons != null) return body.allow_addons ? 1 : 0;
+  const namedAddons = (body.addons || []).filter((a) => a.name.trim());
+  return namedAddons.length > 0 ? 1 : 0;
+}
+
+async function loadOfferingAddons(offeringId: number, allowAddons: number) {
+  if (!allowAddons) return [];
+  return query<{
+    id: number;
+    name: string;
+    price: number;
+    extra_duration: number;
+    active: number;
+  }>(
+    "SELECT id, name, price, extra_duration, active FROM offering_addons WHERE offering_id = ? AND active = 1 ORDER BY id",
+    [offeringId],
+  );
 }
 
 function parseStaffIds(raw: string): number[] {
@@ -437,8 +459,10 @@ async function bookOfferingSlotInstance(
     staff_ids: string;
     offering_name: string;
     offering_currency: string;
+    offering_allow_addons: number;
   }>(
-    `SELECT si.*, o.status, o.base_price, o.duration, o.staff_ids, o.name as offering_name, o.currency as offering_currency
+    `SELECT si.*, o.status, o.base_price, o.duration, o.staff_ids, o.name as offering_name, o.currency as offering_currency,
+            o.allow_addons as offering_allow_addons
      FROM offering_slot_instances si
      JOIN offerings o ON o.id = si.offering_id
      WHERE si.id = ?`,
@@ -458,6 +482,7 @@ async function bookOfferingSlotInstance(
   const selectedAddons: { id: number; price: number }[] = [];
 
   if (addonIds.length > 0) {
+    if (!slot.offering_allow_addons) throw new Error("ADDONS_NOT_ALLOWED");
     const addons = await query<{ id: number; price: number; extra_duration: number }>(
       `SELECT id, price, extra_duration FROM offering_addons
        WHERE offering_id = ? AND active = 1 AND id IN (${addonIds.map(() => "?").join(",")})`,
@@ -654,10 +679,11 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
       booked_count: number;
       base_price: number;
       offering_currency: string;
+      offering_allow_addons: number;
     }>(
       `SELECT si.id, si.offering_id, o.name as offering_name, o.color as offering_color,
               si.slot_date, si.start_time, si.end_time, si.capacity, si.booked_count, o.base_price,
-              o.currency as offering_currency
+              o.currency as offering_currency, o.allow_addons as offering_allow_addons
        FROM offering_slot_instances si
        JOIN offerings o ON o.id = si.offering_id
        WHERE si.slot_date >= ? AND si.slot_date <= ? AND o.status = 'live'
@@ -667,15 +693,17 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
     const enriched = [];
     for (const slot of slots) {
-      const addons = await query<{
-        id: number;
-        name: string;
-        price: number;
-        extra_duration: number;
-      }>(
-        "SELECT id, name, price, extra_duration FROM offering_addons WHERE offering_id = ? AND active = 1",
-        [slot.offering_id],
-      );
+      const addons = slot.offering_allow_addons
+        ? await query<{
+          id: number;
+          name: string;
+          price: number;
+          extra_duration: number;
+        }>(
+          "SELECT id, name, price, extra_duration FROM offering_addons WHERE offering_id = ? AND active = 1",
+          [slot.offering_id],
+        )
+        : [];
       enriched.push({
         id: slot.id,
         offering_id: slot.offering_id,
@@ -751,9 +779,10 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
     const slug = await uniqueOfferingSlug(name);
     const currency = await resolveOfferingCurrency(body.currency);
+    const allowAddons = allowAddonsFromBody(body);
     const result = await run(
-      `INSERT INTO offerings (name, slug, description, detailed_description, base_price, duration, color, category, capacity_per_slot, block_regular_bookings, staff_ids, currency)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO offerings (name, slug, description, detailed_description, base_price, duration, color, category, capacity_per_slot, block_regular_bookings, staff_ids, currency, allow_addons)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         slug,
@@ -767,6 +796,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
         blockRegularToDb(body.block_regular_bookings),
         JSON.stringify(body.staff_ids || []),
         currency,
+        allowAddons,
       ],
     );
 
@@ -835,7 +865,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
       await run(
         `UPDATE offerings SET name = ?, description = ?, detailed_description = ?, base_price = ?, duration = ?, color = ?,
-          block_regular_bookings = ?, updated_at = datetime('now') WHERE id = ?`,
+          block_regular_bookings = ?, allow_addons = ?, updated_at = datetime('now') WHERE id = ?`,
         [
           name,
           body.description?.trim() || "",
@@ -844,6 +874,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
           body.duration ?? existing.duration,
           body.color || existing.color,
           blockRegularToDb(body.block_regular_bookings),
+          body.allow_addons != null ? (body.allow_addons ? 1 : 0) : (existing.allow_addons ?? 1),
           offeringId,
         ],
       );
@@ -864,10 +895,11 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     const currency = body.currency != null
       ? await resolveOfferingCurrency(body.currency)
       : (existing.currency || await getDefaultCurrency());
+    const allowAddons = body.allow_addons != null ? (body.allow_addons ? 1 : 0) : (existing.allow_addons ?? 1);
 
     await run(
       `UPDATE offerings SET name = ?, description = ?, detailed_description = ?, base_price = ?, duration = ?, color = ?, category = ?,
-        capacity_per_slot = ?, block_regular_bookings = ?, staff_ids = ?, currency = ?, updated_at = datetime('now') WHERE id = ?`,
+        capacity_per_slot = ?, block_regular_bookings = ?, staff_ids = ?, currency = ?, allow_addons = ?, updated_at = datetime('now') WHERE id = ?`,
       [
         name,
         body.description?.trim() || "",
@@ -880,6 +912,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
         blockRegularToDb(body.block_regular_bookings),
         JSON.stringify(body.staff_ids || []),
         currency,
+        allowAddons,
         offeringId,
       ],
     );
@@ -956,8 +989,8 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     const o = source.offering;
 
     const result = await run(
-      `INSERT INTO offerings (name, slug, description, detailed_description, base_price, duration, color, category, capacity_per_slot, block_regular_bookings, staff_ids, currency)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO offerings (name, slug, description, detailed_description, base_price, duration, color, category, capacity_per_slot, block_regular_bookings, staff_ids, currency, allow_addons)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         copyName,
         slug,
@@ -971,6 +1004,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
         blockRegularToDb(o.block_regular_bookings),
         JSON.stringify(o.staff_ids),
         o.currency || await getDefaultCurrency(),
+        o.allow_addons ?? 1,
       ],
     );
 
@@ -1178,15 +1212,17 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
       [offering.id, today],
     );
 
-    const addons = await query<{
-      id: number;
-      name: string;
-      price: number;
-      extra_duration: number;
-    }>(
-      "SELECT id, name, price, extra_duration FROM offering_addons WHERE offering_id = ? AND active = 1 ORDER BY id",
-      [offering.id],
-    );
+    const addons = offering.allow_addons
+      ? await query<{
+        id: number;
+        name: string;
+        price: number;
+        extra_duration: number;
+      }>(
+        "SELECT id, name, price, extra_duration FROM offering_addons WHERE offering_id = ? AND active = 1 ORDER BY id",
+        [offering.id],
+      )
+      : [];
 
     const dates = [...new Set(slots.map((s) => s.slot_date))].sort();
     const currency = offering.currency || await getDefaultCurrency();
@@ -1215,6 +1251,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
         base_price: offering.base_price,
         duration: offering.duration,
         category: offering.category,
+        allow_addons: offering.allow_addons ?? 1,
       },
       currency,
       dates,
@@ -1310,7 +1347,15 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     if (!emailCheck.ok) return c.json({ error: emailCheck.error }, 400);
 
     const addonIds = body.addon_ids ?? [];
-    const totalPrice = await computeOfferingBookingTotal(offering.id, offering.base_price, addonIds);
+    if (addonIds.length > 0 && !offering.allow_addons) {
+      return c.json({ error: "Extras are not available for this event" }, 400);
+    }
+    const totalPrice = await computeOfferingBookingTotal(
+      offering.id,
+      offering.base_price,
+      addonIds,
+      offering.allow_addons ?? 1,
+    );
     const depositAmount = resolveOfferingDeposit(totalPrice);
     const paymentChoice: PaymentChoice = body.payment_choice === "deposit" ? "deposit" : "full";
     const checkoutTotal = offeringCheckoutAmount(totalPrice, depositAmount, paymentChoice);

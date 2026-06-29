@@ -299,6 +299,7 @@ CREATE TABLE IF NOT EXISTS offerings (
   block_regular_bookings INTEGER,
   staff_ids TEXT NOT NULL DEFAULT '[]',
   currency TEXT NOT NULL DEFAULT 'USD',
+  allow_addons INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );

@@ -230,6 +230,7 @@ export interface OfferingDetail {
   status: OfferingStatus;
   capacity_per_slot: number;
   block_regular_bookings: boolean | null;
+  allow_addons?: number;
   staff_ids: number[];
   created_at: string;
   updated_at: string;

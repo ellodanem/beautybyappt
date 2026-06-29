@@ -16,6 +16,9 @@ export async function ensureSqliteSchema(): Promise<void> {
     if (!offeringCols.some((c) => c.name === "detailed_description")) {
       await run("ALTER TABLE offerings ADD COLUMN detailed_description TEXT NOT NULL DEFAULT ''");
     }
+    if (!offeringCols.some((c) => c.name === "allow_addons")) {
+      await run("ALTER TABLE offerings ADD COLUMN allow_addons INTEGER NOT NULL DEFAULT 1");
+    }
   }
 
   const staffCols = await query<{ name: string }>("PRAGMA table_info(staff)");

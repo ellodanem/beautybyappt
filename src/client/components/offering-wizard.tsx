@@ -114,6 +114,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     { name: "Lashes", price: 25, extra_duration: 0 },
     { name: "Gems", price: 15, extra_duration: 0 },
   ]);
+  const [allowAddons, setAllowAddons] = useState(true);
 
   useEffect(() => {
     if (useDefaultCurrency) setOfferingCurrency(defaultCurrency);
@@ -167,6 +168,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
         setOfferingCurrency(loadedCurrency);
         const loadedAddons = data.addons.length ? data.addons : [];
         setAddons(loadedAddons);
+        setAllowAddons(o.allow_addons != null ? !!o.allow_addons : loadedAddons.length > 0);
         setSavedBasePrice(o.base_price);
         setSavedAddons(snapshotAddons(loadedAddons));
         setBookedAppointmentCount(data.booked_appointment_count ?? 0);
@@ -189,6 +191,13 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
   const validWindows = dateWindows.filter((w) => w.start_date && w.end_date);
   const preview = countSlotInstances(validWindows, resolvedTimeSlots, capacityPerSlot);
 
+  const filteredAddons = () => addons.filter((a) => a.name.trim()).map((a) => ({
+    ...(a.id != null ? { id: a.id } : {}),
+    name: a.name.trim(),
+    price: a.price,
+    extra_duration: 0,
+  }));
+
   const buildPayload = () => ({
     name: name.trim(),
     description: description.trim(),
@@ -203,12 +212,8 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     duration,
     currency: activeCurrency,
     block_regular_bookings: blockRegularBookings,
-    addons: addons.filter((a) => a.name.trim()).map((a) => ({
-      ...(a.id != null ? { id: a.id } : {}),
-      name: a.name.trim(),
-      price: a.price,
-      extra_duration: 0,
-    })),
+    allow_addons: allowAddons ? 1 : 0,
+    addons: filteredAddons(),
   });
 
   const buildLivePayload = (confirmPriceChanges = false) => ({
@@ -220,12 +225,8 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     duration,
     capacity_per_slot: capacityPerSlot,
     block_regular_bookings: blockRegularBookings,
-    addons: addons.filter((a) => a.name.trim()).map((a) => ({
-      ...(a.id != null ? { id: a.id } : {}),
-      name: a.name.trim(),
-      price: a.price,
-      extra_duration: 0,
-    })),
+    allow_addons: allowAddons ? 1 : 0,
+    addons: filteredAddons(),
     ...(confirmPriceChanges ? { confirm_price_changes: true } : {}),
   });
 
@@ -238,6 +239,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     }>("GET", `/api/offerings/${id}`);
     const loadedAddons = detail.addons.length ? detail.addons : [];
     setAddons(loadedAddons);
+    setAllowAddons(detail.offering.allow_addons != null ? !!detail.offering.allow_addons : loadedAddons.length > 0);
     setSavedBasePrice(detail.offering.base_price);
     setSavedAddons(snapshotAddons(loadedAddons));
     setCapacityPerSlot(detail.offering.capacity_per_slot);
@@ -248,6 +250,13 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     setTimeout(() => setSaved(false), 2500);
   };
 
+  const validateAddons = () => {
+    if (!allowAddons) return true;
+    if (addons.filter((a) => a.name.trim()).length > 0) return true;
+    setError("Add at least one extra, or turn off extras");
+    return false;
+  };
+
   const handleSaveLive = async (confirmPriceChanges = false) => {
     if (!savedId) return;
     if (!name.trim()) {
@@ -255,6 +264,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
       setStep(0);
       return;
     }
+    if (!validateAddons()) return;
 
     if (
       !confirmPriceChanges
@@ -342,6 +352,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
       setStep(2);
       return;
     }
+    if (!validateAddons()) return;
 
     setSaving(true);
     try {
@@ -799,21 +810,47 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
                   Prices for this event are in {activeCurrency} (not your everyday {defaultCurrency}).
                 </p>
               )}
-              <div className="space-y-2">
-                <Label>Extras clients can add (optional)</Label>
-                {addons.map((addon, i) => (
-                  <div key={addon.id ?? i} className="flex gap-2">
-                    <Input placeholder="e.g. Lashes" className="h-11" disabled={!detailsEditable} value={addon.name} onInput={(e) => updateAddon(i, "name", (e.target as HTMLInputElement).value)} />
-                    <Input type="number" placeholder={`+${activeCurrency}`} className="h-11 w-24" disabled={!detailsEditable} value={addon.price} onInput={(e) => updateAddon(i, "price", parseFloat((e.target as HTMLInputElement).value) || 0)} />
-                    {detailsEditable && addons.length > 1 && (
-                      <Button variant="ghost" size="icon" onClick={() => setAddons((p) => p.filter((_, j) => j !== i))}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+              <div className="space-y-3">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    disabled={!detailsEditable}
+                    checked={allowAddons}
+                    onChange={(e) => {
+                      const enabled = (e.target as HTMLInputElement).checked;
+                      setAllowAddons(enabled);
+                      if (enabled && addons.length === 0) {
+                        setAddons([{ name: "", price: 0, extra_duration: 0 }]);
+                      }
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">Let clients add extras</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                      Optional add-ons like lashes, gems, or touch-ups — clients pick what they want when booking.
+                    </span>
+                  </span>
+                </label>
+
+                {allowAddons && (
+                  <div className="space-y-2">
+                    <Label>Extras clients can add</Label>
+                    {addons.map((addon, i) => (
+                      <div key={addon.id ?? i} className="flex gap-2">
+                        <Input placeholder="e.g. Lashes" className="h-11" disabled={!detailsEditable} value={addon.name} onInput={(e) => updateAddon(i, "name", (e.target as HTMLInputElement).value)} />
+                        <Input type="number" placeholder={`+${activeCurrency}`} className="h-11 w-24" disabled={!detailsEditable} value={addon.price} onInput={(e) => updateAddon(i, "price", parseFloat((e.target as HTMLInputElement).value) || 0)} />
+                        {detailsEditable && addons.length > 1 && (
+                          <Button variant="ghost" size="icon" onClick={() => setAddons((p) => p.filter((_, j) => j !== i))}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    {detailsEditable && (
+                      <Button variant="outline" size="sm" onClick={addAddon}><Plus className="mr-1 h-3.5 w-3.5" /> Add extra</Button>
                     )}
                   </div>
-                ))}
-                {detailsEditable && (
-                  <Button variant="outline" size="sm" onClick={addAddon}><Plus className="mr-1 h-3.5 w-3.5" /> Add extra</Button>
                 )}
               </div>
             </>
@@ -825,7 +862,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
               <p>{formatDateWindowsSummary(validWindows) || "No days yet"}</p>
               <p>{resolvedTimeSlots.length} times per day · {capacityPerSlot} clients each</p>
               <p>Starting at {formatMoney(basePrice, activeCurrency)} {activeCurrency}</p>
-              {addons.filter((a) => a.name).length > 0 && (
+              {allowAddons && addons.filter((a) => a.name).length > 0 && (
                 <p>Extras: {addons.filter((a) => a.name).map((a) => `${a.name} +${formatMoney(a.price, activeCurrency)}`).join(", ")}</p>
               )}
               {isDraft && (

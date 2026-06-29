@@ -518,13 +518,21 @@ app.openapi(getAppointment, async (c) => {
   apt.appointment_service_addons = assignedServiceAddons;
 
   if (apt.offering_id) {
-    apt.offering_addons = await query<Record<string, unknown>>(
-      `SELECT id, name, price, extra_duration, active
-       FROM offering_addons
-       WHERE offering_id = ? AND active = 1
-       ORDER BY id`,
+    const offering = await get<{ allow_addons: number }>(
+      "SELECT allow_addons FROM offerings WHERE id = ?",
       [apt.offering_id],
     );
+    if (offering?.allow_addons) {
+      apt.offering_addons = await query<Record<string, unknown>>(
+        `SELECT id, name, price, extra_duration, active
+         FROM offering_addons
+         WHERE offering_id = ? AND active = 1
+         ORDER BY id`,
+        [apt.offering_id],
+      );
+    } else {
+      apt.offering_addons = [];
+    }
   }
 
   const primaryService = svcs[0] as { service_id: number } | undefined;
@@ -589,14 +597,18 @@ app.openapi(updateAppointmentAddons, async (c) => {
       offering_id: number;
       base_price: number;
       duration: number;
+      allow_addons: number;
     }>(
-      `SELECT si.offering_id, o.base_price, o.duration
+      `SELECT si.offering_id, o.base_price, o.duration, o.allow_addons
        FROM offering_slot_instances si
        JOIN offerings o ON o.id = si.offering_id
        WHERE si.id = ?`,
       [apt.offering_slot_instance_id],
     );
     if (!slot) return c.json({ error: "Offering slot not found" }, 404);
+    if (!slot.allow_addons && uniqueIds.length > 0) {
+      return c.json({ error: "Extras are not enabled for this event" }, 400);
+    }
 
     let addonPrice = 0;
     let extraDuration = 0;
