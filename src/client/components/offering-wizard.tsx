@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChevronLeft, ChevronRight, Plus, Trash2, Rocket, Check, Copy, Archive } from "lucide-preact";
 import { ShareOfferingLink } from "./share-offering-link";
+import { ColorPicker } from "./color-picker";
 import {
   generateTimeSlots,
   countSlotInstances,
@@ -543,7 +544,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
                 <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Color on calendar</Label>
-                    <Input type="color" className="h-10 w-full" value={color} onInput={(e) => setColor((e.target as HTMLInputElement).value)} />
+                    <ColorPicker value={color} onChange={setColor} />
                   </div>
                 </div>
               )}

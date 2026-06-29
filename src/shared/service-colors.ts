@@ -7,10 +7,23 @@ export const SERVICE_COLORS = [
   "#ef4444",
   "#14b8a6",
   "#6b7280",
+  "#f97316",
+  "#06b6d4",
+  "#84cc16",
+  "#6366f1",
+  "#f43f5e",
+  "#a855f7",
+  "#059669",
+  "#0ea5e9",
 ] as const;
 
-function normalizeColor(color: string): string {
+export function normalizeColor(color: string): string {
   return color.trim().toLowerCase();
+}
+
+export function isPresetColor(color: string): boolean {
+  const normalized = normalizeColor(color);
+  return SERVICE_COLORS.some((c) => normalizeColor(c) === normalized);
 }
 
 /** First palette color not already used; cycles if all are taken. */
