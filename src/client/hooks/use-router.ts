@@ -9,7 +9,7 @@ export interface RouteState {
 
 const VIEW_ROUTES: Record<string, View> = {
   "": "calendar",
-  "dashboard": "calendar",
+  "dashboard": "dashboard",
   "calendar": "calendar",
   "appointments": "appointments",
   "clients": "clients",

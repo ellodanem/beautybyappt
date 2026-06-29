@@ -8,6 +8,8 @@ import { useRouter } from "./hooks/use-router";
 
 import { Sidebar } from "./components/sidebar";
 
+import { Dashboard } from "./components/dashboard";
+
 import { CalendarView } from "./components/calendar-view";
 
 import { AppointmentList } from "./components/appointment-list";
@@ -109,6 +111,8 @@ export function App() {
     if (view === "clients" && id && appState.selectedClient) return <ClientDetail />;
 
     switch (view) {
+
+      case "dashboard": return <Dashboard />;
 
       case "calendar": return <CalendarView />;
 

@@ -8,7 +8,7 @@ import type { AppContextValue } from "../context";
 import { getCalendarRange, type CalendarViewMode } from "../lib/calendar-range";
 
 export function useAppState(isAgent: boolean, navigate: (to: string) => void): AppContextValue {
-  const [stats, setStats] = useState<Stats>({ appointments: 0, clients: 0, staff: 0, services: 0, products: 0, today_appointments: 0, upcoming_appointments: 0, completed_appointments: 0, revenue: 0, low_stock_products: 0 });
+  const [stats, setStats] = useState<Stats>({ appointments: 0, clients: 0, staff: 0, services: 0, products: 0, today_appointments: 0, upcoming_appointments: 0, completed_appointments: 0, revenue: 0, low_stock_products: 0, pending_payments: 0, week_revenue: 0, week_revenue_by_day: [] });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 

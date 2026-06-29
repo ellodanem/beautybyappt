@@ -246,13 +246,33 @@ const getStats = createRoute({
         completed_appointments: z.number().int(),
         revenue: z.number(),
         low_stock_products: z.number().int(),
+        pending_payments: z.number().int(),
+        week_revenue: z.number(),
+        week_revenue_by_day: z.array(z.object({
+          date: z.string(),
+          revenue: z.number(),
+        })),
       }) } },
     },
   },
 });
 
+function getWeekDateRange(reference = new Date()): { start: string; end: string; days: string[] } {
+  const day = reference.getDay();
+  const monday = new Date(reference);
+  monday.setDate(reference.getDate() - (day === 0 ? 6 : day - 1));
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    days.push(d.toISOString().split("T")[0]);
+  }
+  return { start: days[0], end: days[6], days };
+}
+
 app.openapi(getStats, async (c) => {
   const today = new Date().toISOString().split("T")[0];
+  const { start: weekStart, end: weekEnd, days: weekDays } = getWeekDateRange();
   const appointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments");
   const clients = await get<{ count: number }>("SELECT COUNT(*) as count FROM clients");
   const staff = await get<{ count: number }>("SELECT COUNT(*) as count FROM staff WHERE active = 1");
@@ -263,6 +283,31 @@ app.openapi(getStats, async (c) => {
   const completedAppointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments WHERE status = 'completed'");
   const revenue = await get<{ total: number }>("SELECT COALESCE(SUM(total_price), 0) as total FROM appointments WHERE status = 'completed'");
   const lowStock = await get<{ count: number }>("SELECT COUNT(*) as count FROM products WHERE stock <= low_stock_alert");
+  const pendingPayments = await get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM appointments
+     WHERE status IN ('booked', 'confirmed') AND scheduled_date >= ?
+     AND (
+       (deposit_amount > 0 AND amount_paid < deposit_amount)
+       OR (amount_paid > 0 AND amount_paid < total_price)
+     )`,
+    [today],
+  );
+  const weekRevenue = await get<{ total: number }>(
+    `SELECT COALESCE(SUM(total_price), 0) as total FROM appointments
+     WHERE status = 'completed' AND scheduled_date >= ? AND scheduled_date <= ?`,
+    [weekStart, weekEnd],
+  );
+  const weekRevenueRows = await query<{ scheduled_date: string; revenue: number }>(
+    `SELECT scheduled_date, COALESCE(SUM(total_price), 0) as revenue FROM appointments
+     WHERE status = 'completed' AND scheduled_date >= ? AND scheduled_date <= ?
+     GROUP BY scheduled_date`,
+    [weekStart, weekEnd],
+  );
+  const revenueByDate = new Map(weekRevenueRows.map((row) => [row.scheduled_date, row.revenue]));
+  const weekRevenueByDay = weekDays.map((date) => ({
+    date,
+    revenue: revenueByDate.get(date) ?? 0,
+  }));
   return c.json({
     appointments: appointments?.count || 0,
     clients: clients?.count || 0,
@@ -274,6 +319,9 @@ app.openapi(getStats, async (c) => {
     completed_appointments: completedAppointments?.count || 0,
     revenue: revenue?.total || 0,
     low_stock_products: lowStock?.count || 0,
+    pending_payments: pendingPayments?.count || 0,
+    week_revenue: weekRevenue?.total || 0,
+    week_revenue_by_day: weekRevenueByDay,
   }, 200);
 });
 

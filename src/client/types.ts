@@ -161,6 +161,9 @@ export interface Stats {
   completed_appointments: number;
   revenue: number;
   low_stock_products: number;
+  pending_payments: number;
+  week_revenue: number;
+  week_revenue_by_day: { date: string; revenue: number }[];
 }
 
 export interface PaginatedState {
