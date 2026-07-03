@@ -369,7 +369,6 @@ export async function createAppointmentStripeCheckout(
     cancelUrl: `${base}/pay/${token}?cancelled=1`,
     customerEmail: apt.client_email ?? undefined,
     submitMessage: checkoutCopy.submitMessage,
-    submitButtonLabel: "Book",
     metadata: {
       type: "appointment_payment",
       appointment_id: String(payment.appointment_id),
