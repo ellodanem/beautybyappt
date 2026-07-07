@@ -14,7 +14,7 @@ import {
   type EmailEnv,
 } from "./email-providers.js";
 import { getNotificationSettings } from "./notifications.js";
-import { loadPendingPaymentSummary } from "./appointment-payments.js";
+import { resolvePaymentLinkUrl, templateReferencesPaymentLink } from "./appointment-payments.js";
 import type { StripeEnv } from "./stripe.js";
 import { isValidEmail, normalizeEmail } from "../shared/email.js";
 
@@ -35,6 +35,7 @@ export const EMAIL_TEMPLATE_PLACEHOLDERS = [
   "{amount_paid}",
   "{balance_due}",
   "{payment_link}",
+  "{payment_link_url}",
 ] as const;
 
 export interface EmailTemplate {
@@ -301,6 +302,7 @@ function buildPlaceholderMap(
     amount_paid: formatMoney(ctx.amount_paid, currency),
     balance_due: formatMoney(balance, currency),
     payment_link: paymentLinkUrl ? `Pay here: ${paymentLinkUrl}` : "",
+    payment_link_url: paymentLinkUrl ?? "",
   };
 }
 
@@ -318,6 +320,10 @@ function textToHtml(text: string, businessName: string): string {
       if (line.startsWith("Pay here:")) {
         const url = line.replace(/^Pay here:\s*/, "");
         return `<p style="margin:12px 0"><a href="${escapeHtml(url)}" style="color:#2563eb">${escapeHtml(line)}</a></p>`;
+      }
+      if (/^https?:\/\//.test(line.trim())) {
+        const url = line.trim();
+        return `<p style="margin:12px 0"><a href="${escapeHtml(url)}" style="color:#2563eb">${escapeHtml(url)}</a></p>`;
       }
       return `<p style="margin:0 0 4px 0">${escapeHtml(line)}</p>`;
     });
@@ -426,8 +432,11 @@ async function deliverTemplateEmail(
   if (!ctx) return { ok: false, error: "Appointment not found" };
 
   const branding = await getBranding();
-  const pendingPayment = await loadPendingPaymentSummary(options.appointmentId, env, options.requestUrl);
-  const paymentLinkUrl = pendingPayment?.page_url ?? pendingPayment?.checkout_url ?? null;
+  const autoCreateLink = templateReferencesPaymentLink(options.template);
+  const paymentLinkUrl = await resolvePaymentLinkUrl(env, options.appointmentId, options.requestUrl, {
+    autoCreate: autoCreateLink,
+    addNote: false,
+  });
   const rendered = renderEmailTemplate(options.template, ctx, branding, paymentLinkUrl);
   const subjectPrefix = options.subjectPrefix ?? "";
   const subject = `${subjectPrefix}${rendered.subject}`;

@@ -8,9 +8,8 @@ import {
   type EmailEnv,
 } from "./email-providers.js";
 import { getNotificationSettings } from "./notifications.js";
-import { loadPendingPaymentSummary } from "./appointment-payments.js";
+import { resolvePaymentLinkUrl, templateReferencesPaymentLink } from "./appointment-payments.js";
 import {
-  ensureBuiltinEmailTemplates,
   getEmailTemplateById,
   renderEmailTemplate,
 } from "./email-templates.js";
@@ -377,8 +376,10 @@ async function sendRuleEmail(
   }
 
   const branding = await getBranding();
-  const pendingPayment = await loadPendingPaymentSummary(appointmentId, env, requestUrl);
-  const paymentLinkUrl = pendingPayment?.page_url ?? pendingPayment?.checkout_url ?? null;
+  const paymentLinkUrl = await resolvePaymentLinkUrl(env, appointmentId, requestUrl, {
+    autoCreate: templateReferencesPaymentLink(template),
+    addNote: false,
+  });
   const { subject, text, html } = renderEmailTemplate(template, ctx, branding, paymentLinkUrl);
   const notConfiguredReason = emailNotConfiguredReason(await getEmailProvider());
 

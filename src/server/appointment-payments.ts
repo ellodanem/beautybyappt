@@ -255,6 +255,7 @@ export async function createAppointmentPaymentLink(
   env: StripeEnv,
   appointmentId: number,
   requestUrl: string,
+  options?: { addNote?: boolean },
 ): Promise<{
   page_url: string;
   link_token: string;
@@ -292,10 +293,12 @@ export async function createAppointmentPaymentLink(
     [appointmentId, token, currency],
   );
 
-  await run(
-    "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
-    [appointmentId, `Payment link sent — client can book with deposit (${formatMoney(depositDue, currency)}) or pay in full (${formatMoney(balance, currency)})`],
-  );
+  if (options?.addNote !== false) {
+    await run(
+      "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
+      [appointmentId, `Payment link sent — client can book with deposit (${formatMoney(depositDue, currency)}) or pay in full (${formatMoney(balance, currency)})`],
+    );
+  }
 
   return {
     page_url: `${base}/pay/${token}`,
@@ -304,6 +307,36 @@ export async function createAppointmentPaymentLink(
     deposit_due: depositDue,
     currency,
   };
+}
+
+export function templateReferencesPaymentLink(template: { subject: string; body: string }): boolean {
+  return /\{payment_link/.test(template.subject) || /\{payment_link/.test(template.body);
+}
+
+/** Reuse an open link, or create one when autoCreate is enabled and Stripe allows it. */
+export async function resolvePaymentLinkUrl(
+  env: StripeEnv,
+  appointmentId: number,
+  requestUrl?: string,
+  options?: { autoCreate?: boolean; addNote?: boolean },
+): Promise<string | null> {
+  const pending = await loadPendingPaymentSummary(appointmentId, env, requestUrl);
+  const existing = pending?.page_url ?? pending?.checkout_url ?? null;
+  if (existing) return existing;
+  if (!options?.autoCreate) return null;
+
+  try {
+    const created = await createAppointmentPaymentLink(env, appointmentId, requestUrl ?? "", {
+      addNote: options.addNote,
+    });
+    return created.page_url;
+  } catch (err) {
+    console.warn(
+      `[payments] auto payment link skipped for appointment ${appointmentId}:`,
+      (err as Error).message,
+    );
+    return null;
+  }
 }
 
 export async function createAppointmentStripeCheckout(
