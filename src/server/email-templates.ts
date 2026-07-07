@@ -414,6 +414,7 @@ async function deliverTemplateEmail(
     logStatus: string;
     subjectPrefix?: string;
     requireNotificationsEnabled?: boolean;
+    autoCreatePaymentLink?: boolean;
   },
 ): Promise<{ ok: boolean; error?: string }> {
   const to = normalizeEmail(options.to);
@@ -432,9 +433,9 @@ async function deliverTemplateEmail(
   if (!ctx) return { ok: false, error: "Appointment not found" };
 
   const branding = await getBranding();
-  const autoCreateLink = templateReferencesPaymentLink(options.template);
+  const templateWantsPaymentLink = templateReferencesPaymentLink(options.template);
   const paymentLinkUrl = await resolvePaymentLinkUrl(env, options.appointmentId, options.requestUrl, {
-    autoCreate: autoCreateLink,
+    autoCreate: (options.autoCreatePaymentLink ?? true) && templateWantsPaymentLink,
     addNote: false,
   });
   const rendered = renderEmailTemplate(options.template, ctx, branding, paymentLinkUrl);
@@ -515,6 +516,7 @@ export async function sendTestTemplateEmail(
     logStatus: "test",
     subjectPrefix: "[TEST] ",
     requireNotificationsEnabled: false,
+    autoCreatePaymentLink: false,
   });
 }
 
