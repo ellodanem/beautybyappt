@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Plus, Trash2, ChevronDown, ChevronUp } from "lucide-preact";
+import { TemplateTestSend } from "./template-test-send";
 
 type TemplateRow = {
   id: number;
@@ -95,6 +96,7 @@ function TemplateEditor({
           <p className="text-xs text-muted-foreground">
             Placeholders: {placeholders.join(", ")}
           </p>
+          <TemplateTestSend templateId={template.id} subject={subject} body={body} />
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={!dirty || saving} onClick={handleSave}>
               {saving ? "Saving…" : "Save template"}

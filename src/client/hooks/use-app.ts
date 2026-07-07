@@ -422,6 +422,28 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await api("POST", `/api/appointments/${appointmentId}/send-email`, { template_id: templateId });
   }, []);
 
+  const fetchEmailTestAppointments = useCallback(async () => {
+    const data = await api<{
+      appointments: {
+        id: number;
+        identifier: string;
+        client_name: string;
+        scheduled_date: string;
+        start_time: string;
+        status: string;
+        offering_name: string | null;
+      }[];
+    }>("GET", "/api/settings/email-templates/test-appointments");
+    return data.appointments;
+  }, []);
+
+  const sendTestEmailTemplate = useCallback(async (
+    templateId: number,
+    payload: { appointment_id: number; to: string; subject?: string; body?: string },
+  ) => {
+    await api("POST", `/api/settings/email-templates/${templateId}/test`, payload);
+  }, []);
+
   const fetchEmailDomain = useCallback(async () => {
     const data = await api<{
       resend_configured: boolean;
@@ -827,6 +849,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail, fetchEmailSettings,
     emailTemplates, emailTemplatePlaceholders, fetchEmailTemplates,
     createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
+    fetchEmailTestAppointments, sendTestEmailTemplate,
     branding, updateBranding, uploadBrandingLogo,
     offerings, calendarOfferingSlots, fetchOfferings,
     createOffering, updateOffering, goLiveOffering, duplicateOffering, archiveOffering, deleteOffering, bookOfferingSlot,

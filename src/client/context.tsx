@@ -146,6 +146,19 @@ export interface AppContextValue {
     updated_at: string;
   }>;
   deleteEmailTemplate: (id: number) => Promise<void>;
+  fetchEmailTestAppointments: () => Promise<{
+    id: number;
+    identifier: string;
+    client_name: string;
+    scheduled_date: string;
+    start_time: string;
+    status: string;
+    offering_name: string | null;
+  }[]>;
+  sendTestEmailTemplate: (
+    templateId: number,
+    payload: { appointment_id: number; to: string; subject?: string; body?: string },
+  ) => Promise<void>;
 
   defaultCurrency: string;
   currencyOptions: { value: string; label: string }[];

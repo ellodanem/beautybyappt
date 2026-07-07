@@ -9,12 +9,14 @@ import { appointmentBalance } from "../shared/payment.js";
 import {
   emailNotConfiguredReason,
   getEmailProvider,
+  isEmailConfigured,
   sendProviderEmail,
   type EmailEnv,
 } from "./email-providers.js";
 import { getNotificationSettings } from "./notifications.js";
 import { loadPendingPaymentSummary } from "./appointment-payments.js";
 import type { StripeEnv } from "./stripe.js";
+import { isValidEmail, normalizeEmail } from "../shared/email.js";
 
 export const EMAIL_TEMPLATE_PLACEHOLDERS = [
   "{client_name}",
@@ -352,6 +354,105 @@ async function logTemplateNotification(
   );
 }
 
+export interface EmailTestAppointmentOption {
+  id: number;
+  identifier: string;
+  client_name: string;
+  scheduled_date: string;
+  start_time: string;
+  status: string;
+  offering_name: string | null;
+}
+
+export async function listEmailTestAppointments(limit = 80): Promise<EmailTestAppointmentOption[]> {
+  const rows = await query<{
+    id: number;
+    identifier: string;
+    client_name: string;
+    scheduled_date: string;
+    start_time: string;
+    status: string;
+    offering_name: string | null;
+  }>(
+    `SELECT a.id, a.identifier, cl.name as client_name, a.scheduled_date, a.start_time, a.status,
+            o.name as offering_name
+     FROM appointments a
+     LEFT JOIN clients cl ON cl.id = a.client_id
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     LEFT JOIN offerings o ON o.id = si.offering_id
+     ORDER BY a.scheduled_date DESC, a.start_time DESC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    identifier: row.identifier,
+    client_name: row.client_name || "Unknown client",
+    scheduled_date: row.scheduled_date,
+    start_time: row.start_time,
+    status: row.status,
+    offering_name: row.offering_name,
+  }));
+}
+
+async function deliverTemplateEmail(
+  env: EmailEnv & StripeEnv,
+  options: {
+    appointmentId: number;
+    template: Pick<EmailTemplate, "slug" | "subject" | "body">;
+    to: string;
+    requestUrl?: string;
+    logStatus: string;
+    subjectPrefix?: string;
+    requireNotificationsEnabled?: boolean;
+  },
+): Promise<{ ok: boolean; error?: string }> {
+  const to = normalizeEmail(options.to);
+  if (!isValidEmail(to)) return { ok: false, error: "Enter a valid email address" };
+
+  if (!(await isEmailConfigured(env))) {
+    return { ok: false, error: emailNotConfiguredReason(await getEmailProvider()) };
+  }
+
+  const settings = await getNotificationSettings(env);
+  if (options.requireNotificationsEnabled && !settings.email_enabled) {
+    return { ok: false, error: "Email notifications are disabled in Settings" };
+  }
+
+  const ctx = await loadAppointmentTemplateContext(options.appointmentId);
+  if (!ctx) return { ok: false, error: "Appointment not found" };
+
+  const branding = await getBranding();
+  const pendingPayment = await loadPendingPaymentSummary(options.appointmentId, env, options.requestUrl);
+  const paymentLinkUrl = pendingPayment?.page_url ?? pendingPayment?.checkout_url ?? null;
+  const rendered = renderEmailTemplate(options.template, ctx, branding, paymentLinkUrl);
+  const subjectPrefix = options.subjectPrefix ?? "";
+  const subject = `${subjectPrefix}${rendered.subject}`;
+  const notConfiguredReason = emailNotConfiguredReason(await getEmailProvider());
+
+  const result = await sendProviderEmail(
+    env,
+    to,
+    branding.business_name.trim(),
+    settings.email_reply_to,
+    subject,
+    rendered.text,
+    rendered.html,
+  );
+
+  if (result.skipped) {
+    await logTemplateNotification(options.appointmentId, to, options.template.slug, "skipped", undefined, notConfiguredReason);
+    return { ok: false, error: notConfiguredReason };
+  }
+  if (result.error) {
+    await logTemplateNotification(options.appointmentId, to, options.template.slug, "failed", undefined, result.error);
+    return { ok: false, error: result.error };
+  }
+
+  await logTemplateNotification(options.appointmentId, to, options.template.slug, options.logStatus, result.providerId);
+  return { ok: true };
+}
+
 export async function sendAppointmentTemplateEmail(
   env: EmailEnv & StripeEnv,
   appointmentId: number,
@@ -367,36 +468,42 @@ export async function sendAppointmentTemplateEmail(
   const email = ctx.client_email.trim();
   if (!email) return { ok: false, error: "Client has no email address" };
 
-  const settings = await getNotificationSettings(env);
-  if (!settings.email_enabled) return { ok: false, error: "Email notifications are disabled in Settings" };
+  return deliverTemplateEmail(env, {
+    appointmentId,
+    template,
+    to: email,
+    requestUrl,
+    logStatus: "sent",
+    requireNotificationsEnabled: true,
+  });
+}
 
-  const branding = await getBranding();
-  const pendingPayment = await loadPendingPaymentSummary(appointmentId, env, requestUrl);
-  const paymentLinkUrl = pendingPayment?.page_url ?? pendingPayment?.checkout_url ?? null;
-  const { subject, text, html } = renderEmailTemplate(template, ctx, branding, paymentLinkUrl);
-  const notConfiguredReason = emailNotConfiguredReason(await getEmailProvider());
+export async function sendTestTemplateEmail(
+  env: EmailEnv & StripeEnv,
+  templateId: number,
+  appointmentId: number,
+  toEmail: string,
+  requestUrl?: string,
+  overrides?: { subject?: string; body?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  const template = await getEmailTemplateById(templateId);
+  if (!template) return { ok: false, error: "Template not found" };
 
-  const result = await sendProviderEmail(
-    env,
-    email,
-    branding.business_name.trim(),
-    settings.email_reply_to,
-    subject,
-    text,
-    html,
-  );
+  const draftTemplate = {
+    slug: template.slug,
+    subject: overrides?.subject?.trim() || template.subject,
+    body: overrides?.body?.trim() || template.body,
+  };
 
-  if (result.skipped) {
-    await logTemplateNotification(appointmentId, email, template.slug, "skipped", undefined, notConfiguredReason);
-    return { ok: false, error: notConfiguredReason };
-  }
-  if (result.error) {
-    await logTemplateNotification(appointmentId, email, template.slug, "failed", undefined, result.error);
-    return { ok: false, error: result.error };
-  }
-
-  await logTemplateNotification(appointmentId, email, template.slug, "sent", result.providerId);
-  return { ok: true };
+  return deliverTemplateEmail(env, {
+    appointmentId,
+    template: draftTemplate,
+    to: toEmail,
+    requestUrl,
+    logStatus: "test",
+    subjectPrefix: "[TEST] ",
+    requireNotificationsEnabled: false,
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -546,6 +653,79 @@ export function registerEmailTemplateRoutes(app: OpenAPIHono<any>) {
     if (!existing) return c.json({ error: "Template not found" }, 404);
     if (existing.is_builtin) return c.json({ error: "Built-in templates cannot be deleted" }, 400);
     await run("DELETE FROM email_templates WHERE id = ?", [id]);
+    return c.json({ ok: true }, 200);
+  });
+
+  const testAppointmentsRoute = createRoute({
+    method: "get",
+    path: "/api/settings/email-templates/test-appointments",
+    responses: {
+      200: {
+        description: "Appointments for template test sends",
+        content: {
+          "application/json": {
+            schema: z.object({
+              appointments: z.array(z.object({
+                id: z.number().int(),
+                identifier: z.string(),
+                client_name: z.string(),
+                scheduled_date: z.string(),
+                start_time: z.string(),
+                status: z.string(),
+                offering_name: z.string().nullable(),
+              })),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  app.openapi(testAppointmentsRoute, async (c) => {
+    const appointments = await listEmailTestAppointments();
+    return c.json({ appointments }, 200);
+  });
+
+  const testSendRoute = createRoute({
+    method: "post",
+    path: "/api/settings/email-templates/{id}/test",
+    request: {
+      params: z.object({ id: z.coerce.number().int() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              appointment_id: z.number().int(),
+              to: z.string().min(3).max(200),
+              subject: z.string().max(200).optional(),
+              body: z.string().max(10000).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { description: "Test sent", content: { "application/json": { schema: z.object({ ok: z.boolean() }) } } },
+      400: { description: "Send failed" },
+      404: { description: "Not found" },
+    },
+  });
+
+  app.openapi(testSendRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const env = runtimeEnv(c.env) as EmailEnv & StripeEnv;
+    const result = await sendTestTemplateEmail(
+      env,
+      id,
+      body.appointment_id,
+      body.to,
+      c.req.url,
+      { subject: body.subject, body: body.body },
+    );
+    if (!result.ok) {
+      return c.json({ error: result.error ?? "Failed to send test email" }, 400);
+    }
     return c.json({ ok: true }, 200);
   });
 
