@@ -3,7 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { get, query, run } from "./db.js";
 import { runtimeEnv } from "./runtime-env.js";
 import { getBranding } from "./branding.js";
-import { formatMoney } from "../shared/currency.js";
+import { formatMoney, getCurrency } from "../shared/currency.js";
 import { PLATFORM_NAME } from "../shared/branding.js";
 import { appointmentBalance } from "../shared/payment.js";
 import {
@@ -29,6 +29,8 @@ export const EMAIL_TEMPLATE_PLACEHOLDERS = [
   "{services}",
   "{event_name}",
   "{location}",
+  "{currency}",
+  "{currency_symbol}",
   "{total}",
   "{amount_paid}",
   "{balance_due}",
@@ -293,6 +295,8 @@ function buildPlaceholderMap(
     services: ctx.service_names.length > 0 ? `Services: ${ctx.service_names.join(", ")}` : "",
     event_name: ctx.offering_name?.trim() ? `Event: ${ctx.offering_name.trim()}` : "",
     location: location ? `Location: ${location}` : "",
+    currency,
+    currency_symbol: getCurrency(currency).symbol,
     total: formatMoney(ctx.total_price, currency),
     amount_paid: formatMoney(ctx.amount_paid, currency),
     balance_due: formatMoney(balance, currency),
@@ -308,16 +312,15 @@ function textToHtml(text: string, businessName: string): string {
   const lines = text.split("\n");
   const htmlParts = lines
     .map((line) => {
-      if (line.trim() === "") return "";
+      if (line.trim() === "") return `<p style="margin:0 0 16px 0">&nbsp;</p>`;
       if (line.startsWith("— ")) return `<p style="color:#666;margin-top:24px">${escapeHtml(line)}</p>`;
-      if (line.startsWith("Hi ")) return `<p>${escapeHtml(line)}</p>`;
+      if (line.startsWith("Hi ")) return `<p style="margin:0 0 8px 0">${escapeHtml(line)}</p>`;
       if (line.startsWith("Pay here:")) {
         const url = line.replace(/^Pay here:\s*/, "");
         return `<p style="margin:12px 0"><a href="${escapeHtml(url)}" style="color:#2563eb">${escapeHtml(line)}</a></p>`;
       }
-      return `<p style="margin:4px 0">${escapeHtml(line)}</p>`;
-    })
-    .filter(Boolean);
+      return `<p style="margin:0 0 4px 0">${escapeHtml(line)}</p>`;
+    });
 
   return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111;max-width:520px;margin:0 auto;padding:24px">
 <h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(businessName)}</h1>
