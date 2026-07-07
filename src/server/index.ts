@@ -10,6 +10,7 @@ import { registerAnytimeBookingRoutes } from "./anytime-booking.js";
 import { registerPaymentRoutes } from "./payments.js";
 import { registerAppointmentPaymentRoutes } from "./appointment-payments.js";
 import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
+import { registerEmailTemplateRoutes } from "./email-templates.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
 import { registerEmailProviderRoutes } from "./email-settings.js";
 import { backfillServiceSlugs, uniqueServiceSlug, syncServiceAddons, loadServiceAddons } from "./services.js";
@@ -167,6 +168,7 @@ const AppointmentSchema = z.object({
   recurrence_interval: z.string(),
   client_name: z.string().optional(),
   client_phone: z.string().optional(),
+  client_email: z.string().optional(),
   staff_name: z.string().nullable().optional(),
   staff_color: z.string().nullable().optional(),
   offering_name: z.string().nullable().optional(),
@@ -226,6 +228,7 @@ registerAppointmentPaymentRoutes(app);
 registerSettingsRoutes(app);
 registerBrandingRoutes(app);
 registerNotificationRoutes(app);
+registerEmailTemplateRoutes(app);
 registerEmailDomainRoutes(app);
 registerEmailProviderRoutes(app);
 registerOfferingRoutes(app);
@@ -522,7 +525,7 @@ const getAppointment = createRoute({
 app.openapi(getAppointment, async (c) => {
   const { id } = c.req.valid("param");
   const apt = await get<Record<string, unknown>>(
-    `SELECT a.*, cl.name as client_name, cl.phone as client_phone,
+    `SELECT a.*, cl.name as client_name, cl.phone as client_phone, cl.email as client_email,
             s.name as staff_name, s.color as staff_color,
             o.id as offering_id, o.name as offering_name, o.base_price as offering_base_price
      FROM appointments a

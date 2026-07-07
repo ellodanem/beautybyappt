@@ -104,6 +104,17 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       has_password: false,
     },
   });
+  const [emailTemplates, setEmailTemplates] = useState<{
+    id: number;
+    slug: string;
+    name: string;
+    subject: string;
+    body: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  }[]>([]);
+  const [emailTemplatePlaceholders, setEmailTemplatePlaceholders] = useState<string[]>([]);
 
   const fetchCurrencySettings = useCallback(async () => {
     const data = await api<{ default_currency: string; supported: { value: string; label: string }[] }>(
@@ -367,6 +378,50 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await api("POST", "/api/settings/email/test", to ? { to } : {});
   }, []);
 
+  type EmailTemplateRow = {
+    id: number;
+    slug: string;
+    name: string;
+    subject: string;
+    body: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  };
+
+  const fetchEmailTemplates = useCallback(async () => {
+    const data = await api<{ templates: EmailTemplateRow[]; placeholders: string[] }>(
+      "GET",
+      "/api/settings/email-templates",
+    );
+    setEmailTemplates(data.templates);
+    setEmailTemplatePlaceholders(data.placeholders);
+  }, []);
+
+  const createEmailTemplate = useCallback(async (payload: { name: string; subject: string; body: string }) => {
+    const created = await api<EmailTemplateRow>("POST", "/api/settings/email-templates", payload);
+    await fetchEmailTemplates();
+    return created;
+  }, [fetchEmailTemplates]);
+
+  const updateEmailTemplate = useCallback(async (
+    id: number,
+    payload: { name?: string; subject?: string; body?: string },
+  ) => {
+    const updated = await api<EmailTemplateRow>("PUT", `/api/settings/email-templates/${id}`, payload);
+    await fetchEmailTemplates();
+    return updated;
+  }, [fetchEmailTemplates]);
+
+  const deleteEmailTemplate = useCallback(async (id: number) => {
+    await api("DELETE", `/api/settings/email-templates/${id}`);
+    await fetchEmailTemplates();
+  }, [fetchEmailTemplates]);
+
+  const sendAppointmentTemplateEmail = useCallback(async (appointmentId: number, templateId: number) => {
+    await api("POST", `/api/appointments/${appointmentId}/send-email`, { template_id: templateId });
+  }, []);
+
   const fetchEmailDomain = useCallback(async () => {
     const data = await api<{
       resend_configured: boolean;
@@ -479,6 +534,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
           fetchNotificationSettings(),
           fetchEmailDomain(),
           fetchEmailSettings(),
+          fetchEmailTemplates(),
         ]);
       } catch (err) {
         setError((err as Error).message);
@@ -750,6 +806,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     appointmentsStatusFilter, setAppointmentsStatusFilter,
     addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote, sendAppointmentPaymentLink,
+    sendAppointmentTemplateEmail,
     calendarAppointments, calendarBlocked, calendarEventDay, calendarDate, setCalendarDate,
     calendarView, setCalendarView,
     addBlockedSlot, deleteBlockedSlot,
@@ -768,6 +825,8 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     notificationSettings, updateNotificationSettings,
     emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
     emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail,
+    emailTemplates, emailTemplatePlaceholders, fetchEmailTemplates,
+    createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
     branding, updateBranding, uploadBrandingLogo,
     offerings, calendarOfferingSlots, fetchOfferings,
     createOffering, updateOffering, goLiveOffering, duplicateOffering, archiveOffering, deleteOffering, bookOfferingSlot,

@@ -23,6 +23,7 @@ export interface Appointment {
   recurrence_interval: string;
   client_name?: string;
   client_phone?: string;
+  client_email?: string;
   staff_name?: string | null;
   staff_color?: string | null;
   offering_name?: string | null;

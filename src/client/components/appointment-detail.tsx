@@ -61,6 +61,7 @@ export function AppointmentDetail() {
     selectedAppointment: apt, navigate, updateAppointment, updateAppointmentAddons, deleteAppointment,
     addAppointmentNote, deleteAppointmentNote, staffLookup, defaultCurrency,
     stripeConfigured, stripePaymentsEnabled, sendAppointmentPaymentLink, setError,
+    emailTemplates, notificationSettings, sendAppointmentTemplateEmail,
   } = useApp();
   const [noteText, setNoteText] = useState("");
   const [totalPrice, setTotalPrice] = useState("");
@@ -75,6 +76,9 @@ export function AppointmentDetail() {
   const [selectedAddonIds, setSelectedAddonIds] = useState<number[]>([]);
   const [extrasSaving, setExtrasSaving] = useState(false);
   const [extrasSaved, setExtrasSaved] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateEmailSending, setTemplateEmailSending] = useState(false);
+  const [templateEmailSent, setTemplateEmailSent] = useState(false);
 
   useEffect(() => {
     if (!apt) return;
@@ -93,7 +97,10 @@ export function AppointmentDetail() {
         : (apt.appointment_service_addons ?? []).map((a) => a.service_addon_id),
     );
     setExtrasSaved(false);
-  }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons, apt?.appointment_service_addons, apt?.offering_id]);
+    const paymentReminder = emailTemplates.find((t) => t.slug === "payment_reminder");
+    setSelectedTemplateId(paymentReminder ? String(paymentReminder.id) : emailTemplates[0] ? String(emailTemplates[0].id) : "");
+    setTemplateEmailSent(false);
+  }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons, apt?.appointment_service_addons, apt?.offering_id, emailTemplates]);
 
   const offeringAddons = apt?.offering_addons ?? [];
   const serviceAddons = apt?.service_addons ?? [];
@@ -252,6 +259,40 @@ export function AppointmentDetail() {
       setExtrasSaving(false);
     }
   };
+
+  const handleSendTemplateEmail = async () => {
+    const templateId = parseInt(selectedTemplateId, 10);
+    if (!templateId) return;
+    setTemplateEmailSending(true);
+    setTemplateEmailSent(false);
+    setError(null);
+    try {
+      await sendAppointmentTemplateEmail(apt.id, templateId);
+      setTemplateEmailSent(true);
+      window.setTimeout(() => setTemplateEmailSent(false), 3000);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setTemplateEmailSending(false);
+    }
+  };
+
+  const canSendTemplateEmail = Boolean(
+    apt.client_email?.trim()
+    && notificationSettings.email_enabled
+    && notificationSettings.email_configured
+    && selectedTemplateId,
+  );
+
+  const templateEmailDisabledReason = !apt.client_email?.trim()
+    ? "Client has no email"
+    : !notificationSettings.email_enabled
+      ? "Email notifications disabled in Settings"
+      : !notificationSettings.email_configured
+        ? "Email not configured in Settings"
+        : !selectedTemplateId
+          ? "No templates available"
+          : null;
 
   return (
     <div className="space-y-6 p-4 pb-8 md:p-6">
@@ -603,6 +644,49 @@ export function AppointmentDetail() {
                         )}
                       </div>
                     </>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Send email</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Send a prewritten template to {apt.client_email || "the client"}.
+                {previewBalance > 0 && " Payment reminder includes balance and payment link when available."}
+              </p>
+              {emailTemplates.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No templates yet — add them in Settings.</p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Template</Label>
+                    <select
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      value={selectedTemplateId}
+                      onChange={(e) => setSelectedTemplateId((e.target as HTMLSelectElement).value)}
+                    >
+                      {emailTemplates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!canSendTemplateEmail || templateEmailSending}
+                    onClick={handleSendTemplateEmail}
+                    title={templateEmailDisabledReason ?? undefined}
+                  >
+                    <Mail className="mr-1 h-3.5 w-3.5" />
+                    {templateEmailSending ? "Sending…" : "Send email"}
+                  </Button>
+                  {templateEmailSent && (
+                    <p className="text-sm text-emerald-600">Email sent</p>
                   )}
                 </>
               )}

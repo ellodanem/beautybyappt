@@ -20,6 +20,8 @@ import { BusinessHeader } from "./business-header";
 
 import { MobileNavTrigger } from "./mobile-nav-trigger";
 
+import { EmailTemplatesSettings } from "./email-templates-settings";
+
 
 
 export function SettingsPage() {
@@ -1242,6 +1244,8 @@ export function SettingsPage() {
           {notificationSaved && <p className="text-emerald-600">Notification settings saved.</p>}
         </CardContent>
       </Card>
+
+      <EmailTemplatesSettings />
 
       <Card className="max-w-lg">
 

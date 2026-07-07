@@ -292,6 +292,17 @@ CREATE TABLE IF NOT EXISTS notification_log (
 CREATE INDEX IF NOT EXISTS idx_notification_log_appointment ON notification_log(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_notification_log_created ON notification_log(created_at);
 
+CREATE TABLE IF NOT EXISTS email_templates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  is_builtin INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 -- Seasonal bookable offerings (B1)
 CREATE TABLE IF NOT EXISTS offerings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

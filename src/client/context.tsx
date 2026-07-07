@@ -112,6 +112,40 @@ export interface AppContextValue {
   clearSmtpSettings: () => Promise<void>;
   sendTestEmail: (to?: string) => Promise<void>;
 
+  emailTemplates: {
+    id: number;
+    slug: string;
+    name: string;
+    subject: string;
+    body: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  }[];
+  emailTemplatePlaceholders: string[];
+  fetchEmailTemplates: () => Promise<void>;
+  createEmailTemplate: (data: { name: string; subject: string; body: string }) => Promise<{
+    id: number;
+    slug: string;
+    name: string;
+    subject: string;
+    body: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  }>;
+  updateEmailTemplate: (id: number, data: { name?: string; subject?: string; body?: string }) => Promise<{
+    id: number;
+    slug: string;
+    name: string;
+    subject: string;
+    body: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  }>;
+  deleteEmailTemplate: (id: number) => Promise<void>;
+
   defaultCurrency: string;
   currencyOptions: { value: string; label: string }[];
   updateDefaultCurrency: (code: string) => Promise<void>;
@@ -169,6 +203,7 @@ export interface AppContextValue {
     deposit_due: number;
     currency: string;
   }>;
+  sendAppointmentTemplateEmail: (appointmentId: number, templateId: number) => Promise<void>;
 
   // Calendar
   calendarAppointments: Appointment[];
