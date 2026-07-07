@@ -14,6 +14,8 @@ import {
   type EmailEnv,
   type EmailProvider,
 } from "./email-providers.js";
+import { processScheduledNotifications } from "./notification-rules.js";
+import type { StripeEnv } from "./stripe.js";
 
 export type NotificationEnv = EmailEnv;
 
@@ -596,6 +598,7 @@ async function sendAppointmentReminder(
 
 export interface ReminderRunResult {
   checked: number;
+  sent: number;
   sent_24h: number;
   sent_2h: number;
   skipped: number;
@@ -603,67 +606,16 @@ export interface ReminderRunResult {
 }
 
 export async function processAppointmentReminders(env: NotificationEnv): Promise<ReminderRunResult> {
-  const settings = await getNotificationSettings(env);
-  const utcOffset = await getBusinessUtcOffsetHours();
-  const now = Date.now();
-
-  const appointments = await query<{
-    id: number;
-    scheduled_date: string;
-    start_time: string;
-    status: string;
-    reminder_24h_sent_at: string | null;
-    reminder_2h_sent_at: string | null;
-  }>(
-    `SELECT id, scheduled_date, start_time, status, reminder_24h_sent_at, reminder_2h_sent_at
-     FROM appointments
-     WHERE status IN ('booked', 'confirmed', 'in_progress')
-       AND scheduled_date >= date('now', '-1 day')`,
-  );
-
-  const result: ReminderRunResult = {
-    checked: appointments.length,
-    sent_24h: 0,
-    sent_2h: 0,
-    skipped: 0,
-    failed: 0,
+  const { processScheduledNotifications } = await import("./notification-rules.js");
+  const result = await processScheduledNotifications(env as NotificationEnv & import("./stripe.js").StripeEnv);
+  return {
+    checked: result.checked,
+    sent: result.sent,
+    sent_24h: result.sent_24h,
+    sent_2h: result.sent_2h,
+    skipped: result.skipped,
+    failed: result.failed,
   };
-
-  for (const apt of appointments) {
-    if (!ACTIVE_APPOINTMENT_STATUSES.includes(apt.status)) continue;
-
-    const aptMs = appointmentUtcMs(apt.scheduled_date, apt.start_time, utcOffset);
-    const hoursUntil = (aptMs - now) / 3_600_000;
-    if (hoursUntil < 0) continue;
-
-    for (const window of REMINDER_WINDOWS) {
-      if (!settings[window.settingKey]) continue;
-
-      const alreadyMarked = apt[window.sentColumn]?.trim();
-      if (alreadyMarked) continue;
-
-      const inWindow = hoursUntil <= window.hoursBefore + window.windowHalfHours
-        && hoursUntil > window.hoursBefore - window.windowHalfHours;
-      if (!inWindow) continue;
-
-      const outcome = await sendAppointmentReminder(env, apt.id, window);
-      if (outcome === "sent") {
-        if (window.template === TEMPLATE_REMINDER_24H) result.sent_24h += 1;
-        else result.sent_2h += 1;
-        apt[window.sentColumn] = new Date().toISOString();
-      } else if (outcome === "failed") {
-        result.failed += 1;
-      } else {
-        result.skipped += 1;
-      }
-    }
-  }
-
-  if (result.sent_24h > 0 || result.sent_2h > 0) {
-    console.log(`[reminders] sent 24h=${result.sent_24h} 2h=${result.sent_2h}`);
-  }
-
-  return result;
 }
 
 export function scheduleBookingConfirmation(
@@ -758,8 +710,9 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
     return c.json(await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv), 200);
   });
 
-  const runReminders = async (c: { env: NotificationEnv & { CRON_SECRET?: string }; req: { header: (name: string) => string | undefined } }) => {
-    const env = runtimeEnv(c.env) as NotificationEnv & { CRON_SECRET?: string };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const runReminders = async (c: any) => {
+    const env = runtimeEnv(c.env) as NotificationEnv & StripeEnv & { CRON_SECRET?: string };
     const configuredSecret = env.CRON_SECRET?.trim();
     if (configuredSecret) {
       const auth = c.req.header("Authorization")?.replace(/^Bearer\s+/i, "")
@@ -770,7 +723,7 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
       }
     }
 
-    const result = await processAppointmentReminders(env);
+    const result = await processScheduledNotifications(env, c.req.url);
     return c.json(result, 200);
   };
 

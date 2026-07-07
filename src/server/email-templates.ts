@@ -86,6 +86,28 @@ Please let us know if you have any questions.
 — {business_name}`,
 };
 
+const BUILTIN_APPOINTMENT_REMINDER = {
+  slug: "appointment_reminder",
+  name: "Appointment reminder",
+  subject: "Reminder: your appointment — {date}",
+  body: `Hi {client_name},
+
+Reminder: your appointment with {business_name} is coming up.
+
+Reference: {reference}
+Date: {date}
+Time: {time}
+{event_name}
+{services}
+{location}
+
+{balance_due}
+
+{business_tagline}
+
+— {business_name}`,
+};
+
 function rowToTemplate(row: {
   id: number;
   slug: string;
@@ -113,6 +135,16 @@ export async function ensureBuiltinEmailTemplates(): Promise<void> {
     `INSERT OR IGNORE INTO email_templates (slug, name, subject, body, is_builtin)
      VALUES (?, ?, ?, ?, 1)`,
     [BUILTIN_PAYMENT_REMINDER.slug, BUILTIN_PAYMENT_REMINDER.name, BUILTIN_PAYMENT_REMINDER.subject, BUILTIN_PAYMENT_REMINDER.body],
+  );
+  await run(
+    `INSERT OR IGNORE INTO email_templates (slug, name, subject, body, is_builtin)
+     VALUES (?, ?, ?, ?, 1)`,
+    [
+      BUILTIN_APPOINTMENT_REMINDER.slug,
+      BUILTIN_APPOINTMENT_REMINDER.name,
+      BUILTIN_APPOINTMENT_REMINDER.subject,
+      BUILTIN_APPOINTMENT_REMINDER.body,
+    ],
   );
 }
 
@@ -256,9 +288,9 @@ function buildPlaceholderMap(
     date: formatAppointmentDate(ctx.scheduled_date),
     time: timeLabel,
     staff_name: ctx.staff_name?.trim() ?? "",
-    services: ctx.service_names.join(", "),
-    event_name: ctx.offering_name?.trim() ?? "",
-    location,
+    services: ctx.service_names.length > 0 ? `Services: ${ctx.service_names.join(", ")}` : "",
+    event_name: ctx.offering_name?.trim() ? `Event: ${ctx.offering_name.trim()}` : "",
+    location: location ? `Location: ${location}` : "",
     total: formatMoney(ctx.total_price, currency),
     amount_paid: formatMoney(ctx.amount_paid, currency),
     balance_due: formatMoney(balance, currency),

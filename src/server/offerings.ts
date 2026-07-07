@@ -27,6 +27,12 @@ import {
   resolveOfferingDeposit,
   type PaymentChoice,
 } from "../shared/payment.js";
+import {
+  copyOfferingNotificationRules,
+  loadOfferingNotificationRules,
+  syncOfferingNotificationRules,
+  type NotificationRuleInput,
+} from "./notification-rules.js";
 
 const ErrorSchema = z.object({ error: z.string() });
 const IdParam = z.object({ id: z.string().openapi({ description: "Offering or slot ID" }) });
@@ -48,6 +54,15 @@ const AddonSchema = z.object({
   extra_duration: z.number().int().optional(),
 });
 
+const NotificationRuleBodySchema = z.object({
+  id: z.number().int().optional(),
+  email_template_id: z.number().int(),
+  hours_before: z.number().int().positive(),
+  channel: z.enum(["email"]).optional(),
+  active: z.boolean().optional(),
+  sort_order: z.number().int().optional(),
+});
+
 const OfferingBodySchema = z.object({
   name: z.string(),
   description: z.string().optional(),
@@ -65,6 +80,7 @@ const OfferingBodySchema = z.object({
   allow_addons: z.number().int().optional(),
   confirm_price_changes: z.boolean().optional(),
   currency: z.string().optional(),
+  notification_rules: z.array(NotificationRuleBodySchema).optional(),
 });
 
 type OfferingRow = {
@@ -338,6 +354,7 @@ async function loadOfferingDetail(id: number) {
     date_windows,
     time_slots,
     addons,
+    notification_rules: await loadOfferingNotificationRules(id),
   };
 }
 
@@ -802,6 +819,9 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
 
     const offeringId = result.lastInsertRowid as number;
     await replaceOfferingChildren(offeringId, date_windows, time_slots, body.addons || []);
+    if (body.notification_rules) {
+      await syncOfferingNotificationRules(offeringId, body.notification_rules as NotificationRuleInput[]);
+    }
     const detail = await loadOfferingDetail(offeringId);
     return c.json(detail, 201);
   });
@@ -879,6 +899,9 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
         ],
       );
       await syncOfferingAddons(offeringId, body.addons || []);
+      if (body.notification_rules) {
+        await syncOfferingNotificationRules(offeringId, body.notification_rules as NotificationRuleInput[]);
+      }
       const detail = await loadOfferingDetail(offeringId);
       return c.json(detail, 200);
     }
@@ -918,6 +941,9 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     );
 
     await replaceOfferingChildren(offeringId, date_windows, time_slots, body.addons || []);
+    if (body.notification_rules) {
+      await syncOfferingNotificationRules(offeringId, body.notification_rules as NotificationRuleInput[]);
+    }
     const detail = await loadOfferingDetail(offeringId);
     return c.json(detail, 200);
   });
@@ -1024,6 +1050,7 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
     }));
 
     await replaceOfferingChildren(newId, emptyWindows, timeSlots, addons);
+    await copyOfferingNotificationRules(sourceId, newId);
     const detail = await loadOfferingDetail(newId);
     return c.json(detail, 201);
   });

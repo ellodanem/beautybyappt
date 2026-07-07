@@ -56,6 +56,7 @@ export function SettingsPage() {
     saveSmtpSettings,
     clearSmtpSettings,
     sendTestEmail,
+    fetchEmailSettings,
   } = useApp();
 
 
@@ -82,6 +83,7 @@ export function SettingsPage() {
   const [smtpSaving, setSmtpSaving] = useState(false);
   const [testEmailSaving, setTestEmailSaving] = useState(false);
   const [testEmailSaved, setTestEmailSaved] = useState(false);
+  const [gmailConnectedBanner, setGmailConnectedBanner] = useState(false);
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState("587");
   const [smtpSecure, setSmtpSecure] = useState(false);
@@ -170,23 +172,28 @@ export function SettingsPage() {
     const emailError = params.get("email_error");
     if (!connected && !emailError) return;
 
-    if (connected === "google") {
-      setNotificationSaved(true);
-      setTimeout(() => setNotificationSaved(false), 3000);
-    }
-    if (emailError) {
-      const messages: Record<string, string> = {
-        google_not_configured: "Google sign-in is not set up on this server yet.",
-        google_denied: "Google sign-in was cancelled.",
-      };
-      setError(messages[emailError] || decodeURIComponent(emailError));
-    }
+    void (async () => {
+      if (connected === "google") {
+        await fetchEmailSettings();
+        await updateNotificationSettings({});
+        setGmailConnectedBanner(true);
+        setTimeout(() => setGmailConnectedBanner(false), 4000);
+      }
+      if (emailError) {
+        const messages: Record<string, string> = {
+          google_not_configured: "Google sign-in is not set up on this server yet.",
+          google_denied: "Google sign-in was cancelled.",
+          invalid_oauth_state: "Gmail connection expired — click Connect Gmail and try again.",
+        };
+        setError(messages[emailError] || decodeURIComponent(emailError));
+      }
 
-    params.delete("email_connected");
-    params.delete("email_error");
-    const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
-    window.history.replaceState(null, "", next);
-  }, [setError]);
+      params.delete("email_connected");
+      params.delete("email_error");
+      const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
+      window.history.replaceState(null, "", next);
+    })();
+  }, [setError, fetchEmailSettings, updateNotificationSettings]);
 
   const providerLabel = (provider: string) => {
     if (provider === "google") return "Gmail";
@@ -646,6 +653,11 @@ export function SettingsPage() {
           <p className="text-muted-foreground">
             Choose how booking confirmations and reminders are sent. Most artists can connect Gmail in one click — no DNS or technical setup.
           </p>
+          {gmailConnectedBanner && (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
+              Gmail connected successfully.
+            </p>
+          )}
 
           <div className="grid gap-2">
             {([

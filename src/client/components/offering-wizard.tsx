@@ -23,9 +23,16 @@ import {
 } from "../../shared/offerings";
 import { formatMoney, getCurrency } from "../../shared/currency";
 import { cn, formatTimeShort } from "@/lib/utils";
-import type { OfferingAddon, OfferingDateWindow, OfferingDetail, OfferingTimeSlot } from "../types";
+import type { OfferingAddon, OfferingDateWindow, OfferingDetail, OfferingNotificationRule, OfferingTimeSlot } from "../types";
+import {
+  OfferingNotificationRulesEditor,
+  draftFromHoursBefore,
+  hoursBeforeFromDraft,
+  formatRuleTiming,
+  type NotificationRuleDraft,
+} from "./offering-notification-rules";
 
-const STEPS = ["Name it", "Your days", "Your times", "Price & extras", "All set"];
+const STEPS = ["Name it", "Your days", "Your times", "Price & extras", "Reminders", "All set"];
 
 function snapshotAddons(addons: OfferingAddon[]): OfferingAddon[] {
   return addons.map((a) => ({ ...a }));
@@ -68,6 +75,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     navigate, createOffering, updateOffering, goLiveOffering,
     duplicateOffering, archiveOffering, deleteOffering,
     setError, defaultCurrency, currencyOptions, blockRegularOnEventDays,
+    emailTemplates,
   } = useApp();
 
   const [step, setStep] = useState(0);
@@ -115,6 +123,8 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     { name: "Gems", price: 15, extra_duration: 0 },
   ]);
   const [allowAddons, setAllowAddons] = useState(true);
+  const [useDefaultNotifications, setUseDefaultNotifications] = useState(true);
+  const [notificationRules, setNotificationRules] = useState<NotificationRuleDraft[]>([]);
 
   useEffect(() => {
     if (useDefaultCurrency) setOfferingCurrency(defaultCurrency);
@@ -136,6 +146,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
       date_windows: OfferingDateWindow[];
       time_slots: OfferingTimeSlot[];
       addons: OfferingAddon[];
+      notification_rules?: OfferingNotificationRule[];
       booked_appointment_count?: number;
       max_booked_per_slot?: number;
       can_delete?: boolean;
@@ -177,11 +188,24 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
         setDeleteBlockedReason(data.delete_blocked_reason ?? null);
         setUpcomingAppointmentCount(data.upcoming_appointment_count ?? 0);
         setStatus(o.status);
-        if (o.status === "archived") setStep(4);
+        if (o.status === "archived") setStep(5);
         setSavedId(o.id);
         setBlockRegularBookings(
           o.block_regular_bookings !== null ? o.block_regular_bookings : blockRegularOnEventDays,
         );
+        const loadedRules = data.notification_rules ?? [];
+        if (loadedRules.length > 0) {
+          setUseDefaultNotifications(false);
+          setNotificationRules(loadedRules.map((rule) => ({
+            id: rule.id,
+            email_template_id: rule.email_template_id,
+            active: rule.active,
+            ...draftFromHoursBefore(rule.hours_before),
+          })));
+        } else {
+          setUseDefaultNotifications(true);
+          setNotificationRules([]);
+        }
       })
       .catch((err) => setError((err as Error).message))
       .finally(() => setLoading(false));
@@ -197,6 +221,18 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     price: a.price,
     extra_duration: 0,
   }));
+
+  const buildNotificationRulesPayload = () => {
+    if (useDefaultNotifications) return [];
+    return notificationRules
+      .filter((rule) => rule.email_template_id > 0 && rule.amount > 0)
+      .map((rule, index) => ({
+        email_template_id: rule.email_template_id,
+        hours_before: hoursBeforeFromDraft(rule),
+        active: rule.active,
+        sort_order: index,
+      }));
+  };
 
   const buildPayload = () => ({
     name: name.trim(),
@@ -214,6 +250,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     block_regular_bookings: blockRegularBookings,
     allow_addons: allowAddons ? 1 : 0,
     addons: filteredAddons(),
+    notification_rules: buildNotificationRulesPayload(),
   });
 
   const buildLivePayload = (confirmPriceChanges = false) => ({
@@ -227,6 +264,7 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
     block_regular_bookings: blockRegularBookings,
     allow_addons: allowAddons ? 1 : 0,
     addons: filteredAddons(),
+    notification_rules: buildNotificationRulesPayload(),
     ...(confirmPriceChanges ? { confirm_price_changes: true } : {}),
   });
 
@@ -353,6 +391,11 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
       return;
     }
     if (!validateAddons()) return;
+    if (!useDefaultNotifications && notificationRules.length === 0) {
+      setError("Add at least one custom reminder, or use default reminders");
+      setStep(4);
+      return;
+    }
 
     setSaving(true);
     try {
@@ -439,6 +482,10 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
         : "Pick at least one day");
       return;
     }
+    if (step === 4 && !useDefaultNotifications && notificationRules.length === 0) {
+      setError("Add at least one custom reminder, or use default reminders");
+      return;
+    }
     setStep((s) => s + 1);
   };
 
@@ -458,8 +505,8 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
   const scheduleLocked = !isDraft;
   const capacityEditable = isLive;
   const progress = `${step + 1} of ${STEPS.length}`;
-  const canSaveLive = isLive && [0, 2, 3, 4].includes(step);
-  const canManage = (isLive || isArchived) && step === 4;
+  const canSaveLive = isLive && [0, 2, 3, 4, 5].includes(step);
+  const canManage = (isLive || isArchived) && step === 5;
   const showDelete = !!savedId && (isDraft || isLive || isArchived);
 
   return (
@@ -857,6 +904,17 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
           )}
 
           {step === 4 && (
+            <OfferingNotificationRulesEditor
+              useDefaultNotifications={useDefaultNotifications}
+              onUseDefaultChange={setUseDefaultNotifications}
+              rules={notificationRules}
+              onRulesChange={setNotificationRules}
+              emailTemplates={emailTemplates}
+              disabled={!detailsEditable}
+            />
+          )}
+
+          {step === 5 && (
             <div className="space-y-3 text-sm">
               <p className="text-lg font-semibold">{name || "Your event"}</p>
               <p>{formatDateWindowsSummary(validWindows) || "No days yet"}</p>
@@ -865,6 +923,14 @@ export function EventOfferWizard({ offeringId }: WizardProps) {
               {allowAddons && addons.filter((a) => a.name).length > 0 && (
                 <p>Extras: {addons.filter((a) => a.name).map((a) => `${a.name} +${formatMoney(a.price, activeCurrency)}`).join(", ")}</p>
               )}
+              <p>
+                Reminders: {useDefaultNotifications
+                  ? "Default schedule (24h and 2h before)"
+                  : notificationRules.map((rule) => {
+                    const template = emailTemplates.find((t) => t.id === rule.email_template_id);
+                    return `${template?.name ?? "Template"} · ${formatRuleTiming(rule)}`;
+                  }).join("; ")}
+              </p>
               {isDraft && (
                 <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3">
                   <input

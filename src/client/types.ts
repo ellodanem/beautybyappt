@@ -220,6 +220,17 @@ export interface OfferingAddon {
   active?: number;
 }
 
+export interface OfferingNotificationRule {
+  id: number;
+  offering_id: number | null;
+  email_template_id: number;
+  email_template_name: string;
+  hours_before: number;
+  channel: string;
+  active: boolean;
+  sort_order: number;
+}
+
 export interface OfferingDetail {
   id: number;
   name: string;

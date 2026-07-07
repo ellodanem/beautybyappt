@@ -111,6 +111,7 @@ export interface AppContextValue {
   }) => Promise<void>;
   clearSmtpSettings: () => Promise<void>;
   sendTestEmail: (to?: string) => Promise<void>;
+  fetchEmailSettings: () => Promise<void>;
 
   emailTemplates: {
     id: number;

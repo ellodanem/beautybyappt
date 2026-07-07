@@ -5,7 +5,7 @@ const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GMAIL_SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
-const USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+const USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 
 export type GoogleEmailEnv = {
   GOOGLE_CLIENT_ID?: string;
@@ -44,7 +44,7 @@ export function buildGoogleAuthUrl(env: GoogleEmailEnv, requestUrl: string, stat
     client_id: env.GOOGLE_CLIENT_ID!.trim(),
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: GMAIL_SCOPE,
+    scope: `${GMAIL_SCOPE} https://www.googleapis.com/auth/userinfo.email openid`,
     access_type: "offline",
     prompt: "consent",
     state,
@@ -59,11 +59,29 @@ export function newGoogleOAuthState(): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+function decodeJwtPayload(idToken: string): Record<string, unknown> {
+  const parts = idToken.split(".");
+  if (parts.length < 2) return {};
+  let payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+  while (payload.length % 4 !== 0) payload += "=";
+  try {
+    return JSON.parse(atob(payload)) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function emailFromIdToken(idToken: string): string {
+  const payload = decodeJwtPayload(idToken);
+  const email = payload.email;
+  return typeof email === "string" ? email.trim() : "";
+}
+
 async function exchangeCode(
   env: GoogleEmailEnv,
   code: string,
   redirectUri: string,
-): Promise<{ access_token: string; refresh_token?: string; error?: string }> {
+): Promise<{ access_token: string; refresh_token?: string; id_token?: string; error?: string }> {
   const res = await fetch(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -78,13 +96,18 @@ async function exchangeCode(
   const data = await res.json() as {
     access_token?: string;
     refresh_token?: string;
+    id_token?: string;
     error?: string;
     error_description?: string;
   };
   if (!res.ok) {
     return { access_token: "", error: data.error_description || data.error || `Google token error ${res.status}` };
   }
-  return { access_token: data.access_token || "", refresh_token: data.refresh_token };
+  return {
+    access_token: data.access_token || "",
+    refresh_token: data.refresh_token,
+    id_token: data.id_token,
+  };
 }
 
 async function refreshAccessToken(
@@ -117,12 +140,34 @@ async function refreshAccessToken(
   return { access_token: data.access_token || "" };
 }
 
-async function fetchGmailAddress(accessToken: string): Promise<string> {
+async function resolveGmailAddress(
+  accessToken: string,
+  idToken?: string,
+): Promise<string> {
+  if (idToken) {
+    const fromJwt = emailFromIdToken(idToken);
+    if (fromJwt) return fromJwt;
+  }
+
+  const profileRes = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const profile = await profileRes.json() as { emailAddress?: string; error?: { message?: string } };
+  if (profile.emailAddress?.trim()) return profile.emailAddress.trim();
+  if (!profileRes.ok) {
+    console.error("[gmail] profile lookup failed:", profile.error?.message || profileRes.status);
+  }
+
   const res = await fetch(USERINFO_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
-  const data = await res.json() as { email?: string };
-  return data.email?.trim() || "";
+  const data = await res.json() as { email?: string; error?: { message?: string } };
+  if (data.email?.trim()) return data.email.trim();
+  if (!res.ok) {
+    console.error("[gmail] userinfo lookup failed:", data.error?.message || res.status);
+  }
+
+  return "";
 }
 
 export async function connectGmail(
@@ -154,9 +199,11 @@ export async function connectGmail(
     return { error: "Google did not return a refresh token — revoke app access in your Google account and try again" };
   }
 
-  const address = await fetchGmailAddress(tokens.access_token);
+  const address = await resolveGmailAddress(tokens.access_token, tokens.id_token);
   if (!address) {
-    return { error: "Could not read your Gmail address from Google" };
+    return {
+      error: "Could not read your Gmail address. In Google Cloud Console, add the userinfo.email scope on the OAuth consent screen, enable the Gmail API, then revoke app access at myaccount.google.com/permissions and connect again.",
+    };
   }
 
   await setMetaValue("gmail_refresh_token_enc", await encryptSecret(refreshToken, env));

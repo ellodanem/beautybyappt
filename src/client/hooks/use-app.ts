@@ -824,7 +824,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, updateStripePaymentsEnabled,
     notificationSettings, updateNotificationSettings,
     emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
-    emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail,
+    emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail, fetchEmailSettings,
     emailTemplates, emailTemplatePlaceholders, fetchEmailTemplates,
     createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
     branding, updateBranding, uploadBrandingLogo,
