@@ -55,6 +55,7 @@ export interface AppContextValue {
     whatsapp_enabled: boolean;
     email_reply_to: string;
     email_configured: boolean;
+    email_provider: "google" | "resend" | "smtp";
     remind_24h_enabled: boolean;
     remind_2h_enabled: boolean;
   };
@@ -80,6 +81,36 @@ export interface AppContextValue {
   verifyEmailDomain: () => Promise<void>;
   refreshEmailDomain: () => Promise<void>;
   setEmailFromAddress: (fromAddress: string) => Promise<void>;
+
+  emailSettings: {
+    provider: "google" | "resend" | "smtp";
+    configured: boolean;
+    google_oauth_available: boolean;
+    gmail_connected: boolean;
+    gmail_address: string;
+    resend_available: boolean;
+    smtp: {
+      host: string;
+      port: number;
+      secure: boolean;
+      username: string;
+      from_address: string;
+      configured: boolean;
+      has_password: boolean;
+    };
+  };
+  updateEmailProvider: (provider: "google" | "resend" | "smtp") => Promise<void>;
+  disconnectGmail: () => Promise<void>;
+  saveSmtpSettings: (data: {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password?: string;
+    from_address: string;
+  }) => Promise<void>;
+  clearSmtpSettings: () => Promise<void>;
+  sendTestEmail: (to?: string) => Promise<void>;
 
   defaultCurrency: string;
   currencyOptions: { value: string; label: string }[];

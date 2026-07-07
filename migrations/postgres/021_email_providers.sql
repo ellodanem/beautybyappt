@@ -1,0 +1,9 @@
+INSERT INTO _meta (key, value) VALUES ('email_provider', 'google') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('gmail_address', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('gmail_refresh_token_enc', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_host', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_port', '587') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_secure', '0') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_username', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_password_enc', '') ON CONFLICT (key) DO NOTHING;
+INSERT INTO _meta (key, value) VALUES ('smtp_from_address', '') ON CONFLICT (key) DO NOTHING;

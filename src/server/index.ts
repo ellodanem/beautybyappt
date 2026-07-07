@@ -11,6 +11,7 @@ import { registerPaymentRoutes } from "./payments.js";
 import { registerAppointmentPaymentRoutes } from "./appointment-payments.js";
 import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
+import { registerEmailProviderRoutes } from "./email-settings.js";
 import { backfillServiceSlugs, uniqueServiceSlug, syncServiceAddons, loadServiceAddons } from "./services.js";
 import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
 import { derivePaymentStatus } from "../shared/payment.js";
@@ -29,6 +30,8 @@ type Env = {
     APP_URL?: string;
     RESEND_API_KEY?: string;
     EMAIL_FROM?: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
     CRON_SECRET?: string;
     ADMIN_PASSWORD?: string;
     SESSION_SECRET?: string;
@@ -224,6 +227,7 @@ registerSettingsRoutes(app);
 registerBrandingRoutes(app);
 registerNotificationRoutes(app);
 registerEmailDomainRoutes(app);
+registerEmailProviderRoutes(app);
 registerOfferingRoutes(app);
 registerAnytimeBookingRoutes(app);
 

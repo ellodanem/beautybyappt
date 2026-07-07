@@ -888,6 +888,10 @@ export function PublicAnytimePage({ serviceSlug }: Props) {
 
                             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
 
+                            placeholder="you@example.com"
+
+                            required
+
                           />
 
                         </div>

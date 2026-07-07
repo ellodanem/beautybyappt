@@ -46,3 +46,4 @@ psql "$DATABASE_URL" -f migrations/postgres/001_a1_booking_links.sql
 | `009_e1_reminders` | `reminder_24h_sent_at`, `reminder_2h_sent_at`; reminder toggles in `_meta` |
 | `010_email_domain` | Resend domain connect settings in `_meta` (`email_domain`, `email_from_address`, etc.) |
 | `011_offering_currency` | `currency` on `offerings` (per-event pricing currency) |
+| `021_email_providers` | Gmail OAuth + SMTP provider settings in `_meta` (`email_provider`, `gmail_*`, `smtp_*`) |

@@ -568,6 +568,40 @@ These do not block local C1 work. Revisit when moving to multi-tenant hosting:
 - [x] Stripe Connect vs single merchant account? → **Single test account now; Connect at SaaS**
 - [x] Currency: USD default + per-link override (A1); Stripe must support chosen currency at checkout
 
+### Stripe fee pass-through *(future activation — not implemented)*
+
+**Product decision (locked):** Stripe processing fees are absorbed into the checkout total so the business receives the full listed price. Clients never see a separate “processing fee” line item.
+
+| Where | What the client sees |
+|-------|----------------------|
+| Site, booking flows, staff UI, emails | **Listed price** (e.g. **$100**) — the amount the business intends to keep |
+| Stripe Checkout (payment step only) | **Grossed-up total** that includes Stripe fees (e.g. **$103.30**) |
+
+**Goal:** If a service is priced at $100 USD, the salon nets **$100** after Stripe takes its cut.
+
+**How it works (concept):**
+
+1. All catalog, booking-link, offering, deposit, and travel-fee amounts are stored and displayed as **net** (merchant take-home).
+2. When creating the Stripe Checkout session, compute the charge amount so that after Stripe’s fee the net equals the listed total.
+3. Standard US online card formula: `charge = (net + $0.30) / (1 - 0.029)` for 2.9% + $0.30.
+4. Apply the same gross-up per line item or on the session total (deposits, travel fees, multi-service carts).
+
+**Example ($100 service, US domestic card, 2.9% + $0.30):**
+
+| Step | Amount |
+|------|--------|
+| Client sees on site / booking | $100.00 |
+| Stripe Checkout charge | $103.30 |
+| Stripe fee (≈) | $3.30 |
+| **Business receives** | **$100.00** |
+
+**Open at implementation time:**
+
+- [ ] Fee table by payment method / currency (ACH, international +1.5%, conversion +1%, Terminal, etc.)
+- [ ] International cards: gross up for worst-case vs absorb variance vs show domestic-only estimate
+- [ ] Whether Stripe receipt shows itemized net vs single gross total
+- [ ] Settings toggle: fee pass-through on/off (for businesses who prefer to show fees separately)
+
 ## Acceptance criteria
 
 - [x] Client can pay deposit via Stripe on booking link confirm

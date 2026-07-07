@@ -5,13 +5,17 @@ import { runtimeEnv } from "./runtime-env.js";
 import { getBranding } from "./branding.js";
 import { formatMoney } from "../shared/currency.js";
 import { PLATFORM_NAME } from "../shared/branding.js";
-import { getConfiguredFromAddress } from "./email-domain.js";
 import { getBusinessUtcOffsetHours } from "./business-locale.js";
+import {
+  emailNotConfiguredReason,
+  getEmailProvider,
+  isEmailConfigured,
+  sendProviderEmail,
+  type EmailEnv,
+  type EmailProvider,
+} from "./email-providers.js";
 
-export type NotificationEnv = {
-  RESEND_API_KEY?: string;
-  EMAIL_FROM?: string;
-};
+export type NotificationEnv = EmailEnv;
 
 export interface NotificationSettings {
   email_enabled: boolean;
@@ -19,6 +23,7 @@ export interface NotificationSettings {
   whatsapp_enabled: boolean;
   email_reply_to: string;
   email_configured: boolean;
+  email_provider: EmailProvider;
   remind_24h_enabled: boolean;
   remind_2h_enabled: boolean;
 }
@@ -100,17 +105,14 @@ async function setMetaValue(key: string, value: string): Promise<void> {
   await run("INSERT OR REPLACE INTO _meta (key, value) VALUES (?, ?)", [key, value]);
 }
 
-export function isEmailConfigured(env: NotificationEnv): boolean {
-  return Boolean(env.RESEND_API_KEY?.trim());
-}
-
 export async function getNotificationSettings(env: NotificationEnv): Promise<NotificationSettings> {
   return {
     email_enabled: await metaFlag("notify_email_enabled", true),
     sms_enabled: await metaFlag("notify_sms_enabled", false),
     whatsapp_enabled: await metaFlag("notify_whatsapp_enabled", false),
     email_reply_to: await getMetaValue("email_reply_to"),
-    email_configured: isEmailConfigured(env),
+    email_configured: await isEmailConfigured(env),
+    email_provider: await getEmailProvider(),
     remind_24h_enabled: await metaFlag("remind_24h_enabled", true),
     remind_2h_enabled: await metaFlag("remind_2h_enabled", true),
   };
@@ -445,48 +447,6 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-async function sendEmail(
-  env: NotificationEnv,
-  to: string,
-  fromName: string,
-  replyTo: string,
-  subject: string,
-  text: string,
-  html: string,
-): Promise<{ providerId?: string; skipped?: boolean; error?: string }> {
-  if (!isEmailConfigured(env)) {
-    console.log("[notifications] Email (dev — no RESEND_API_KEY):\n", text);
-    return { skipped: true };
-  }
-
-  const fromAddress = await getConfiguredFromAddress(env);
-  const from = fromName ? `${fromName} <${fromAddress}>` : fromAddress;
-
-  const body: Record<string, unknown> = {
-    from,
-    to: [to],
-    subject,
-    text,
-    html,
-  };
-  if (replyTo.trim()) body.reply_to = replyTo.trim();
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  const data = await res.json().catch(() => ({})) as { id?: string; message?: string };
-  if (!res.ok) {
-    return { error: data.message || `Resend error ${res.status}` };
-  }
-  return { providerId: data.id };
-}
-
 export async function sendBookingConfirmation(
   env: NotificationEnv,
   appointmentId: number,
@@ -502,13 +462,14 @@ export async function sendBookingConfirmation(
   const includeReceipt = options?.receipt ?? ctx.amount_paid > 0;
   const { subject, text, html } = buildConfirmationText(ctx, branding, includeReceipt);
   const shortText = buildShortConfirmationText(ctx, branding, includeReceipt);
+  const notConfiguredReason = emailNotConfiguredReason(settings.email_provider);
 
   if (settings.email_enabled) {
     const email = ctx.client_email.trim();
     if (!email) {
       await logNotification(appointmentId, "email", "", TEMPLATE_CONFIRMATION, "skipped", undefined, "No client email");
     } else {
-      const result = await sendEmail(
+      const result = await sendProviderEmail(
         env,
         email,
         branding.business_name.trim(),
@@ -518,7 +479,7 @@ export async function sendBookingConfirmation(
         html,
       );
       if (result.skipped) {
-        await logNotification(appointmentId, "email", email, TEMPLATE_CONFIRMATION, "skipped", undefined, "RESEND_API_KEY not set");
+        await logNotification(appointmentId, "email", email, TEMPLATE_CONFIRMATION, "skipped", undefined, notConfiguredReason);
       } else if (result.error) {
         await logNotification(appointmentId, "email", email, TEMPLATE_CONFIRMATION, "failed", undefined, result.error);
       } else {
@@ -572,6 +533,7 @@ async function sendAppointmentReminder(
   const branding = await getBranding();
   const { subject, text, html } = buildReminderText(ctx, branding, window);
   const shortText = buildShortReminderText(ctx, branding, window);
+  const notConfiguredReason = emailNotConfiguredReason(settings.email_provider);
 
   let delivered = false;
   let hadFailure = false;
@@ -581,7 +543,7 @@ async function sendAppointmentReminder(
     if (!email) {
       await logNotification(appointmentId, "email", "", window.template, "skipped", undefined, "No client email");
     } else {
-      const result = await sendEmail(
+      const result = await sendProviderEmail(
         env,
         email,
         branding.business_name.trim(),
@@ -591,7 +553,7 @@ async function sendAppointmentReminder(
         html,
       );
       if (result.skipped) {
-        await logNotification(appointmentId, "email", email, window.template, "skipped", undefined, "RESEND_API_KEY not set");
+        await logNotification(appointmentId, "email", email, window.template, "skipped", undefined, notConfiguredReason);
         delivered = true;
       } else if (result.error) {
         await logNotification(appointmentId, "email", email, window.template, "failed", undefined, result.error);
@@ -726,6 +688,7 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
     whatsapp_enabled: z.boolean(),
     email_reply_to: z.string(),
     email_configured: z.boolean(),
+    email_provider: z.enum(["google", "resend", "smtp"]),
     remind_24h_enabled: z.boolean(),
     remind_2h_enabled: z.boolean(),
   });

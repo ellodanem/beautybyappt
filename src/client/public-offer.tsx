@@ -870,7 +870,7 @@ export function PublicOfferPage({ slug }: { slug: string }) {
 
                         <div className="space-y-1.5">
 
-                          <Label htmlFor="email">Email</Label>
+                          <Label htmlFor="email">Email *</Label>
 
                           <Input
 
@@ -885,6 +885,8 @@ export function PublicOfferPage({ slug }: { slug: string }) {
                             onInput={(e) => setEmail((e.target as HTMLInputElement).value)}
 
                             placeholder="you@example.com"
+
+                            required
 
                           />
 

@@ -137,6 +137,15 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('resend_domain_id', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain_status', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_domain_records', '[]');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_from_address', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_provider', 'google');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('gmail_address', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('gmail_refresh_token_enc', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_host', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_port', '587');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_secure', '0');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_username', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_password_enc', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_from_address', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('subscription_plan', 'free');
 
 -- Custom booking links (A1)

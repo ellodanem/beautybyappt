@@ -11,8 +11,12 @@ APP_URL=http://localhost:5173
 
 
 
-# Booking confirmation emails (Resend — https://resend.com)
-# Platform API key; each business verifies their own domain in Settings → Email domain
+# Booking confirmation emails
+# Recommended: connect Gmail in Settings (needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET below)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Advanced: platform Resend API key for custom-domain sending (Settings → Custom domain)
 RESEND_API_KEY=re_your_key_here
 # Fallback from address until domain is verified in Settings
 EMAIL_FROM=onboarding@resend.dev

@@ -74,6 +74,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     whatsapp_enabled: false,
     email_reply_to: "",
     email_configured: false,
+    email_provider: "google" as const,
     remind_24h_enabled: true,
     remind_2h_enabled: true,
   });
@@ -85,6 +86,23 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     from_address: "",
     records: [] as { record: string; name: string; type: string; value: string; priority?: number; status?: string }[],
     can_send_from_domain: false,
+  });
+  const [emailSettings, setEmailSettings] = useState({
+    provider: "google" as const,
+    configured: false,
+    google_oauth_available: false,
+    gmail_connected: false,
+    gmail_address: "",
+    resend_available: false,
+    smtp: {
+      host: "",
+      port: 587,
+      secure: false,
+      username: "",
+      from_address: "",
+      configured: false,
+      has_password: false,
+    },
   });
 
   const fetchCurrencySettings = useCallback(async () => {
@@ -279,6 +297,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       whatsapp_enabled: boolean;
       email_reply_to: string;
       email_configured: boolean;
+      email_provider: "google" | "resend" | "smtp";
       remind_24h_enabled: boolean;
       remind_2h_enabled: boolean;
     }>("GET", "/api/settings/notifications");
@@ -299,10 +318,53 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       whatsapp_enabled: boolean;
       email_reply_to: string;
       email_configured: boolean;
+      email_provider: "google" | "resend" | "smtp";
       remind_24h_enabled: boolean;
       remind_2h_enabled: boolean;
     }>("PUT", "/api/settings/notifications", data);
     setNotificationSettings(res);
+  }, []);
+
+  const fetchEmailSettings = useCallback(async () => {
+    const data = await api<typeof emailSettings>("GET", "/api/settings/email");
+    setEmailSettings(data);
+  }, []);
+
+  const updateEmailProvider = useCallback(async (provider: "google" | "resend" | "smtp") => {
+    const data = await api<typeof emailSettings>("PUT", "/api/settings/email/provider", { provider });
+    setEmailSettings(data);
+    await fetchNotificationSettings();
+  }, [fetchNotificationSettings]);
+
+  const disconnectGmail = useCallback(async () => {
+    const data = await api<typeof emailSettings>("DELETE", "/api/settings/email/google");
+    setEmailSettings(data);
+    await fetchNotificationSettings();
+  }, [fetchNotificationSettings]);
+
+  const saveSmtpSettings = useCallback(async (payload: {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password?: string;
+    from_address: string;
+  }) => {
+    const smtp = await api<typeof emailSettings.smtp>("PUT", "/api/settings/email/smtp", payload);
+    setEmailSettings((prev) => ({ ...prev, smtp }));
+    await fetchEmailSettings();
+    await fetchNotificationSettings();
+  }, [fetchNotificationSettings, fetchEmailSettings]);
+
+  const clearSmtpSettings = useCallback(async () => {
+    const smtp = await api<typeof emailSettings.smtp>("DELETE", "/api/settings/email/smtp");
+    setEmailSettings((prev) => ({ ...prev, smtp }));
+    await fetchEmailSettings();
+    await fetchNotificationSettings();
+  }, [fetchNotificationSettings, fetchEmailSettings]);
+
+  const sendTestEmail = useCallback(async (to?: string) => {
+    await api("POST", "/api/settings/email/test", to ? { to } : {});
   }, []);
 
   const fetchEmailDomain = useCallback(async () => {
@@ -416,6 +478,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
           fetchStripeSettings(),
           fetchNotificationSettings(),
           fetchEmailDomain(),
+          fetchEmailSettings(),
         ]);
       } catch (err) {
         setError((err as Error).message);
@@ -704,6 +767,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, updateStripePaymentsEnabled,
     notificationSettings, updateNotificationSettings,
     emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
+    emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail,
     branding, updateBranding, uploadBrandingLogo,
     offerings, calendarOfferingSlots, fetchOfferings,
     createOffering, updateOffering, goLiveOffering, duplicateOffering, archiveOffering, deleteOffering, bookOfferingSlot,
