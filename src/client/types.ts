@@ -2,6 +2,13 @@ export type View = "dashboard" | "calendar" | "appointments" | "clients" | "staf
 
 export type AppointmentStatus = "booked" | "confirmed" | "in_progress" | "completed" | "cancelled" | "no_show";
 
+export interface AppointmentReminderStatusItem {
+  rule_id: number;
+  template_name: string;
+  hours_before: number;
+  sent_at: string | null;
+}
+
 export interface Appointment {
   id: number;
   identifier: string;
@@ -33,6 +40,8 @@ export interface Appointment {
   latest_note?: string | null;
   reminder_24h_sent_at?: string | null;
   reminder_2h_sent_at?: string | null;
+  uses_custom_reminders?: boolean;
+  appointment_reminders?: AppointmentReminderStatusItem[];
   offering_id?: number | null;
   offering_base_price?: number | null;
   offering_addons?: OfferingAddon[];

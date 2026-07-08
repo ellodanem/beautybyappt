@@ -264,6 +264,117 @@ async function alreadySentForRule(appointmentId: number, ruleId: number): Promis
   return Boolean(row);
 }
 
+export interface AppointmentReminderStatusItem {
+  rule_id: number;
+  template_name: string;
+  hours_before: number;
+  sent_at: string | null;
+}
+
+function reminderItemsForRules(
+  rules: NotificationRule[],
+  sentByRule: Map<number, string>,
+  settings: { remind_24h_enabled: boolean; remind_2h_enabled: boolean },
+): AppointmentReminderStatusItem[] {
+  return rules
+    .map((rule) => ({
+      rule_id: rule.id,
+      template_name: rule.email_template_name,
+      hours_before: rule.hours_before,
+      sent_at: sentByRule.get(rule.id) ?? null,
+    }))
+    .filter((item, index) => {
+      const rule = rules[index];
+      const enabled = rule.offering_id != null
+        ? rule.active
+        : globalRuleEnabled(rule.hours_before, settings);
+      return enabled || item.sent_at != null;
+    });
+}
+
+export async function buildAppointmentReminderStatus(
+  appointmentId: number,
+  offeringId: number | null,
+  settings: { remind_24h_enabled: boolean; remind_2h_enabled: boolean },
+): Promise<{ uses_custom_reminders: boolean; appointment_reminders: AppointmentReminderStatusItem[] }> {
+  const uses_custom_reminders = offeringId != null && await offeringHasCustomRules(offeringId);
+  const rules = await loadActiveRulesForAppointment(offeringId);
+  const sentRows = await query<{ rule_id: number; sent_at: string }>(
+    `SELECT rule_id, sent_at FROM appointment_notification_sent WHERE appointment_id = ?`,
+    [appointmentId],
+  );
+  const sentByRule = new Map(sentRows.map((row) => [row.rule_id, row.sent_at]));
+  return {
+    uses_custom_reminders,
+    appointment_reminders: reminderItemsForRules(rules, sentByRule, settings),
+  };
+}
+
+export async function attachReminderStatusToAppointments(
+  appointments: Record<string, unknown>[],
+  settings: { remind_24h_enabled: boolean; remind_2h_enabled: boolean },
+): Promise<void> {
+  if (appointments.length === 0) return;
+
+  const aptIds = appointments.map((apt) => apt.id as number);
+  const placeholders = aptIds.map(() => "?").join(",");
+  const sentRows = await query<{ appointment_id: number; rule_id: number; sent_at: string }>(
+    `SELECT appointment_id, rule_id, sent_at
+     FROM appointment_notification_sent
+     WHERE appointment_id IN (${placeholders})`,
+    aptIds,
+  );
+  const sentByApt = new Map<number, Map<number, string>>();
+  for (const row of sentRows) {
+    let ruleMap = sentByApt.get(row.appointment_id);
+    if (!ruleMap) {
+      ruleMap = new Map();
+      sentByApt.set(row.appointment_id, ruleMap);
+    }
+    ruleMap.set(row.rule_id, row.sent_at);
+  }
+
+  const offeringIds = [
+    ...new Set(
+      appointments
+        .map((apt) => apt.offering_id as number | null | undefined)
+        .filter((id): id is number => typeof id === "number" && id > 0),
+    ),
+  ];
+
+  const customOfferingIds = new Set<number>();
+  if (offeringIds.length > 0) {
+    const offeringPlaceholders = offeringIds.map(() => "?").join(",");
+    const customRows = await query<{ offering_id: number }>(
+      `SELECT DISTINCT offering_id
+       FROM notification_rules
+       WHERE offering_id IN (${offeringPlaceholders}) AND active = 1`,
+      offeringIds,
+    );
+    for (const row of customRows) customOfferingIds.add(row.offering_id);
+  }
+
+  const globalRules = await loadActiveRulesForAppointment(null);
+  const rulesByOffering = new Map<number, NotificationRule[]>();
+  for (const offeringId of customOfferingIds) {
+    const rules = await loadOfferingNotificationRules(offeringId);
+    rulesByOffering.set(offeringId, rules.filter((rule) => rule.active));
+  }
+
+  for (const apt of appointments) {
+    const appointmentId = apt.id as number;
+    const offeringId = apt.offering_id as number | null | undefined;
+    const uses_custom_reminders = typeof offeringId === "number" && customOfferingIds.has(offeringId);
+    const rules = uses_custom_reminders && offeringId
+      ? (rulesByOffering.get(offeringId) ?? [])
+      : globalRules;
+    const sentByRule = sentByApt.get(appointmentId) ?? new Map<number, string>();
+
+    apt.uses_custom_reminders = uses_custom_reminders;
+    apt.appointment_reminders = reminderItemsForRules(rules, sentByRule, settings);
+  }
+}
+
 async function markRuleSent(appointmentId: number, ruleId: number): Promise<void> {
   await run(
     `INSERT OR IGNORE INTO appointment_notification_sent (appointment_id, rule_id, sent_at)

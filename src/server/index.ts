@@ -9,7 +9,8 @@ import { registerOfferingRoutes } from "./offerings.js";
 import { registerAnytimeBookingRoutes } from "./anytime-booking.js";
 import { registerPaymentRoutes } from "./payments.js";
 import { registerAppointmentPaymentRoutes } from "./appointment-payments.js";
-import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, type NotificationEnv } from "./notifications.js";
+import { registerNotificationRoutes, scheduleBookingConfirmation, processAppointmentReminders, getNotificationSettings, type NotificationEnv } from "./notifications.js";
+import { attachReminderStatusToAppointments, buildAppointmentReminderStatus } from "./notification-rules.js";
 import { registerEmailTemplateRoutes } from "./email-templates.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
 import { registerEmailProviderRoutes } from "./email-settings.js";
@@ -147,6 +148,13 @@ const OfferingAddonSchema = z.object({
   active: z.number().int().optional(),
 }).openapi("OfferingAddon");
 
+const AppointmentReminderStatusSchema = z.object({
+  rule_id: z.number().int(),
+  template_name: z.string(),
+  hours_before: z.number().int(),
+  sent_at: z.string().nullable(),
+}).openapi("AppointmentReminderStatus");
+
 const AppointmentSchema = z.object({
   id: z.number().int(),
   identifier: z.string(),
@@ -178,6 +186,8 @@ const AppointmentSchema = z.object({
   latest_note: z.string().nullable().optional(),
   reminder_24h_sent_at: z.string().nullable().optional(),
   reminder_2h_sent_at: z.string().nullable().optional(),
+  uses_custom_reminders: z.boolean().optional(),
+  appointment_reminders: z.array(AppointmentReminderStatusSchema).optional(),
   offering_id: z.number().int().nullable().optional(),
   offering_base_price: z.number().nullable().optional(),
   offering_addons: z.array(OfferingAddonSchema).optional(),
@@ -383,6 +393,7 @@ app.openapi(listAppointments, async (c) => {
   const appointments = await query<Record<string, unknown>>(
     `SELECT a.*, cl.name as client_name, cl.phone as client_phone,
             s.name as staff_name, s.color as staff_color,
+            si.offering_id as offering_id,
             o.name as offering_name, o.color as offering_color,
             (SELECT sv.name FROM appointment_services aps
              LEFT JOIN services sv ON sv.id = aps.service_id
@@ -446,6 +457,9 @@ app.openapi(listAppointments, async (c) => {
       apt.appointment_service_addons = serviceAddonsByAppointment.get(apt.id as number) ?? [];
     }
   }
+
+  const notificationSettings = await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv);
+  await attachReminderStatusToAppointments(appointments, notificationSettings);
 
   return c.json({ appointments, total: total?.count || 0 }, 200);
 });
@@ -609,6 +623,15 @@ app.openapi(getAppointment, async (c) => {
     c.req.url,
   );
   apt.pending_payment = pendingPayment ?? null;
+
+  const notificationSettings = await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv);
+  const reminderStatus = await buildAppointmentReminderStatus(
+    parseInt(String(id), 10),
+    (apt.offering_id as number | null) ?? null,
+    notificationSettings,
+  );
+  apt.uses_custom_reminders = reminderStatus.uses_custom_reminders;
+  apt.appointment_reminders = reminderStatus.appointment_reminders;
 
   return c.json({ appointment: apt }, 200);
 });

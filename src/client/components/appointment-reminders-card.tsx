@@ -21,7 +21,7 @@ export function AppointmentRemindersCard({
     return null;
   }
 
-  const rows = getReminderDetailRows(appointment, settings).filter((row) => row.enabled || row.sentAt);
+  const rows = getReminderDetailRows(appointment, settings);
 
   if (rows.length === 0) return null;
 
@@ -32,7 +32,7 @@ export function AppointmentRemindersCard({
       </CardHeader>
       <CardContent className="space-y-2.5">
         {rows.map((row) => (
-          <div key={row.window} className="flex items-start gap-2 text-sm">
+          <div key={row.key} className="flex items-start gap-2 text-sm">
             <Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <div className="min-w-0">
               <span className="text-muted-foreground">{row.label}</span>
