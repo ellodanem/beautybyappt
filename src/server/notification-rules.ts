@@ -10,6 +10,7 @@ import {
 import { getNotificationSettings } from "./notifications.js";
 import { resolvePaymentLinkUrl, templateReferencesPaymentLink } from "./appointment-payments.js";
 import {
+  ensureBuiltinEmailTemplates,
   getEmailTemplateById,
   renderEmailTemplate,
 } from "./email-templates.js";
