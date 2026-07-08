@@ -10,6 +10,7 @@ import { StatusBadge } from "./status-badge";
 import { MobileNavTrigger } from "./mobile-nav-trigger";
 import { PaymentBadge } from "./payment-badge";
 import { CloseOutBanner } from "./close-out-banner";
+import { AppointmentRemindersCard } from "./appointment-reminders-card";
 import { formatDateShort, formatTimeShort } from "@/lib/utils";
 import { formatMoney } from "../../shared/currency";
 import { appointmentBalance, computeDefaultDeposit } from "../../shared/payment";
@@ -534,6 +535,8 @@ export function AppointmentDetail() {
         </div>
 
         <div className="space-y-6">
+          <AppointmentRemindersCard appointment={apt} settings={notificationSettings} />
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">

@@ -28,6 +28,7 @@ import { cn, formatDateShort, formatTimeShort } from "@/lib/utils";
 import { needsCloseOut } from "../../shared/appointment-closeout";
 import { CloseOutRowActions, useCloseOutClock } from "./close-out-row-actions";
 import { AppointmentExtrasChips } from "./appointment-extras-chips";
+import { AppointmentReminderIndicator } from "./appointment-reminder-indicator";
 import type { Appointment, AppointmentStatus } from "../types";
 
 
@@ -156,9 +157,10 @@ function AppointmentMobileCard({
 
       </div>
 
-      <p className="mb-1.5 text-sm text-muted-foreground">
+      <p className="mb-1.5 flex items-center gap-1 text-sm text-muted-foreground">
 
         {formatDateShort(apt.scheduled_date)} · {formatTimeShort(apt.start_time)}
+        <AppointmentReminderIndicator appointment={apt} />
 
       </p>
 
@@ -496,7 +498,12 @@ export function AppointmentList() {
 
                           <TableCell className="whitespace-nowrap text-xs">{formatDateShort(apt.scheduled_date)}</TableCell>
 
-                          <TableCell className="text-xs">{formatTimeShort(apt.start_time)}</TableCell>
+                          <TableCell className="text-xs">
+                            <span className="inline-flex items-center gap-1">
+                              {formatTimeShort(apt.start_time)}
+                              <AppointmentReminderIndicator appointment={apt} />
+                            </span>
+                          </TableCell>
 
                           <TableCell>
                             <div>

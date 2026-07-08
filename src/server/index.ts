@@ -176,6 +176,8 @@ const AppointmentSchema = z.object({
   offering_color: z.string().nullable().optional(),
   service_color: z.string().nullable().optional(),
   latest_note: z.string().nullable().optional(),
+  reminder_24h_sent_at: z.string().nullable().optional(),
+  reminder_2h_sent_at: z.string().nullable().optional(),
   offering_id: z.number().int().nullable().optional(),
   offering_base_price: z.number().nullable().optional(),
   offering_addons: z.array(OfferingAddonSchema).optional(),

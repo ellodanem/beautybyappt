@@ -31,6 +31,8 @@ export interface Appointment {
   offering_color?: string | null;
   service_color?: string | null;
   latest_note?: string | null;
+  reminder_24h_sent_at?: string | null;
+  reminder_2h_sent_at?: string | null;
   offering_id?: number | null;
   offering_base_price?: number | null;
   offering_addons?: OfferingAddon[];

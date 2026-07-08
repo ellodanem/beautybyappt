@@ -18,3 +18,17 @@ export function formatTimeShort(time: string): string {
   const hour = h % 12 || 12;
   return `${hour}:${String(m).padStart(2, "0")} ${period}`;
 }
+
+/** e.g. "Mon 19 Jul, 11:00 AM" from ISO or SQLite datetime */
+export function formatDateTimeShort(value: string): string {
+  const normalized = value.includes("T") ? value : value.replace(" ", "T");
+  const d = new Date(normalized);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
