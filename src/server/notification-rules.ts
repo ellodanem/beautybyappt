@@ -21,6 +21,7 @@ export interface NotificationRule {
   offering_id: number | null;
   email_template_id: number;
   email_template_name: string;
+  email_template_slug: string;
   hours_before: number;
   channel: string;
   active: boolean;
@@ -70,6 +71,7 @@ function rowToRule(row: {
   offering_id: number | null;
   email_template_id: number;
   email_template_name: string;
+  email_template_slug: string;
   hours_before: number;
   channel: string;
   active: number;
@@ -80,6 +82,7 @@ function rowToRule(row: {
     offering_id: row.offering_id,
     email_template_id: row.email_template_id,
     email_template_name: row.email_template_name,
+    email_template_slug: row.email_template_slug,
     hours_before: row.hours_before,
     channel: row.channel,
     active: row.active === 1,
@@ -139,6 +142,7 @@ export async function loadOfferingNotificationRules(offeringId: number): Promise
     sort_order: number;
   }>(
     `SELECT nr.id, nr.offering_id, nr.email_template_id, et.name as email_template_name,
+            et.slug as email_template_slug,
             nr.hours_before, nr.channel, nr.active, nr.sort_order
      FROM notification_rules nr
      JOIN email_templates et ON et.id = nr.email_template_id
@@ -225,6 +229,7 @@ async function loadActiveRulesForAppointment(offeringId: number | null): Promise
     sort_order: number;
   }>(
     `SELECT nr.id, nr.offering_id, nr.email_template_id, et.name as email_template_name,
+            et.slug as email_template_slug,
             nr.hours_before, nr.channel, nr.active, nr.sort_order
      FROM notification_rules nr
      JOIN email_templates et ON et.id = nr.email_template_id
@@ -276,13 +281,14 @@ function reminderItemsForRules(
   rules: NotificationRule[],
   sentByRule: Map<number, string>,
   settings: { remind_24h_enabled: boolean; remind_2h_enabled: boolean },
+  sentByTemplateSlug: Map<string, string> = new Map(),
 ): AppointmentReminderStatusItem[] {
   return rules
     .map((rule) => ({
       rule_id: rule.id,
       template_name: rule.email_template_name,
       hours_before: rule.hours_before,
-      sent_at: sentByRule.get(rule.id) ?? null,
+      sent_at: sentByRule.get(rule.id) ?? sentByTemplateSlug.get(rule.email_template_slug) ?? null,
     }))
     .filter((item, index) => {
       const rule = rules[index];
@@ -291,6 +297,50 @@ function reminderItemsForRules(
         : globalRuleEnabled(rule.hours_before, settings);
       return enabled || item.sent_at != null;
     });
+}
+
+async function loadSentByTemplateSlug(appointmentIds: number[]): Promise<Map<number, Map<string, string>>> {
+  const byAppointment = new Map<number, Map<string, string>>();
+  if (appointmentIds.length === 0) return byAppointment;
+
+  const placeholders = appointmentIds.map(() => "?").join(",");
+  const rows = await query<{ appointment_id: number; template: string; sent_at: string }>(
+    `SELECT appointment_id, template, MAX(created_at) as sent_at
+     FROM notification_log
+     WHERE appointment_id IN (${placeholders}) AND status = 'sent'
+     GROUP BY appointment_id, template`,
+    appointmentIds,
+  );
+  for (const row of rows) {
+    let slugMap = byAppointment.get(row.appointment_id);
+    if (!slugMap) {
+      slugMap = new Map();
+      byAppointment.set(row.appointment_id, slugMap);
+    }
+    slugMap.set(row.template, row.sent_at);
+  }
+  return byAppointment;
+}
+
+export async function markReminderSentForManualTemplate(
+  appointmentId: number,
+  templateId: number,
+): Promise<void> {
+  const apt = await get<{ offering_id: number | null }>(
+    `SELECT si.offering_id
+     FROM appointments a
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     WHERE a.id = ?`,
+    [appointmentId],
+  );
+  if (!apt) return;
+
+  const rules = await loadActiveRulesForAppointment(apt.offering_id);
+  for (const rule of rules) {
+    if (rule.email_template_id === templateId) {
+      await markRuleSent(appointmentId, rule.id);
+    }
+  }
 }
 
 export async function buildAppointmentReminderStatus(
@@ -305,9 +355,15 @@ export async function buildAppointmentReminderStatus(
     [appointmentId],
   );
   const sentByRule = new Map(sentRows.map((row) => [row.rule_id, row.sent_at]));
+  const sentByTemplateSlug = await loadSentByTemplateSlug([appointmentId]);
   return {
     uses_custom_reminders,
-    appointment_reminders: reminderItemsForRules(rules, sentByRule, settings),
+    appointment_reminders: reminderItemsForRules(
+      rules,
+      sentByRule,
+      settings,
+      sentByTemplateSlug.get(appointmentId) ?? new Map(),
+    ),
   };
 }
 
@@ -362,6 +418,8 @@ export async function attachReminderStatusToAppointments(
     rulesByOffering.set(offeringId, rules.filter((rule) => rule.active));
   }
 
+  const sentByTemplateSlug = await loadSentByTemplateSlug(aptIds);
+
   for (const apt of appointments) {
     const appointmentId = apt.id as number;
     const offeringId = apt.offering_id as number | null | undefined;
@@ -372,7 +430,12 @@ export async function attachReminderStatusToAppointments(
     const sentByRule = sentByApt.get(appointmentId) ?? new Map<number, string>();
 
     apt.uses_custom_reminders = uses_custom_reminders;
-    apt.appointment_reminders = reminderItemsForRules(rules, sentByRule, settings);
+    apt.appointment_reminders = reminderItemsForRules(
+      rules,
+      sentByRule,
+      settings,
+      sentByTemplateSlug.get(appointmentId) ?? new Map(),
+    );
   }
 }
 

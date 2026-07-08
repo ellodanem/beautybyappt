@@ -420,7 +420,11 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const sendAppointmentTemplateEmail = useCallback(async (appointmentId: number, templateId: number) => {
     await api("POST", `/api/appointments/${appointmentId}/send-email`, { template_id: templateId });
-  }, []);
+    if (selectedAppointment && selectedAppointment.id === appointmentId) {
+      const aptRes = await api<{ appointment: Appointment }>("GET", `/api/appointments/${appointmentId}`);
+      setSelectedAppointment(aptRes.appointment);
+    }
+  }, [selectedAppointment]);
 
   const fetchEmailTestAppointments = useCallback(async () => {
     const data = await api<{

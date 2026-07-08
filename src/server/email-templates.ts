@@ -481,7 +481,7 @@ export async function sendAppointmentTemplateEmail(
   const email = ctx.client_email.trim();
   if (!email) return { ok: false, error: "Client has no email address" };
 
-  return deliverTemplateEmail(env, {
+  const result = await deliverTemplateEmail(env, {
     appointmentId,
     template,
     to: email,
@@ -489,6 +489,11 @@ export async function sendAppointmentTemplateEmail(
     logStatus: "sent",
     requireNotificationsEnabled: true,
   });
+  if (result.ok) {
+    const { markReminderSentForManualTemplate } = await import("./notification-rules.js");
+    await markReminderSentForManualTemplate(appointmentId, templateId);
+  }
+  return result;
 }
 
 export async function sendTestTemplateEmail(
