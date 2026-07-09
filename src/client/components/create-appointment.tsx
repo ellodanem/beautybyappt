@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { cn, formatTimeShort } from "@/lib/utils";
 import { formatMoney } from "../../shared/currency";
 import { CreateClient } from "./create-client";
@@ -58,6 +58,7 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
   const [selectedSlotId, setSelectedSlotId] = useState<number | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<number[]>([]);
   const [showCreateClient, setShowCreateClient] = useState(false);
+  const [bookingMode, setBookingMode] = useState<"event" | "regular">("regular");
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +103,17 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
   const canSubmitEvent = hasEventSlots;
   const canSubmitRegular = !regularBlocked && !showDraftWarning;
   const eventOnlyMode = hasEventSlots && regularBlocked;
+  const dualBookingMode = canSubmitEvent && canSubmitRegular;
+  const showEventSection = canSubmitEvent && (!dualBookingMode || bookingMode === "event");
+  const showRegularSection = canSubmitRegular && (!dualBookingMode || bookingMode === "regular");
+
+  useEffect(() => {
+    if (canSubmitEvent && !canSubmitRegular) {
+      setBookingMode("event");
+    } else if (canSubmitRegular && !canSubmitEvent) {
+      setBookingMode("regular");
+    }
+  }, [date, canSubmitEvent, canSubmitRegular]);
 
   const toggleService = (id: number) => {
     setSelectedServices((prev) =>
@@ -179,16 +191,49 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
   const showForm = canSubmitEvent || canSubmitRegular;
 
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-lg">
-        <DialogHeader>
+        <DialogHeader className="space-y-3">
           <DialogTitle>{eventOnlyMode ? "Book event client" : "New Booking"}</DialogTitle>
+          {dualBookingMode && !loadingDay && (
+            <div className="flex rounded-lg border bg-muted/40 p-1" role="tablist" aria-label="Booking type">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={bookingMode === "event"}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  bookingMode === "event"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground",
+                )}
+                onClick={() => setBookingMode("event")}
+              >
+                Event client
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={bookingMode === "regular"}
+                className={cn(
+                  "flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  bookingMode === "regular"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground",
+                )}
+                onClick={() => setBookingMode("regular")}
+              >
+                Everyday booking
+              </button>
+            </div>
+          )}
         </DialogHeader>
 
+        <DialogBody>
         {loadingDay ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading availability…</p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-4">
             {hasEventSlots && (
               <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
                 <span
@@ -197,9 +242,13 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                 />
                 <strong>{eventName}</strong>
                 <span className="text-muted-foreground">
-                  {canSubmitRegular
-                    ? " — book an event slot below, or an everyday service further down"
-                    : " — pick a time slot below"}
+                  {dualBookingMode
+                    ? bookingMode === "event"
+                      ? " — pick a time slot below"
+                      : " — book an everyday service below"
+                    : canSubmitRegular
+                      ? " — book an event slot below, or an everyday service further down"
+                      : " — pick a time slot below"}
                 </span>
               </div>
             )}
@@ -227,7 +276,7 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
 
             {showForm && (
               <>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label>Client *</Label>
                     <div className="flex gap-1.5">
@@ -271,9 +320,9 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </>
             )}
 
-            {canSubmitEvent && (
+            {showEventSection && (
               <div className="space-y-2">
-                <Label>{canSubmitRegular ? "Event booking" : "Event time"} *</Label>
+                <Label>Event time *</Label>
                 <div className="max-h-48 space-y-2 overflow-y-auto">
                   {daySlots.map((slot) => {
                     const spotsLeft = slot.capacity - slot.booked_count;
@@ -331,14 +380,10 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </div>
             )}
 
-            {canSubmitRegular && canSubmitEvent && (
-              <div className="border-t pt-4" />
-            )}
-
-            {canSubmitRegular && (
+            {showRegularSection && (
               <>
                 <div className="space-y-1.5">
-                  <Label>{canSubmitEvent ? "Everyday booking — start time" : "Start Time"}</Label>
+                  <Label>Start time</Label>
                   <Input type="time" value={startTime} onChange={(e) => setStartTime((e.target as HTMLInputElement).value)} />
                 </div>
 
@@ -418,20 +463,17 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
             )}
           </div>
         )}
+        </DialogBody>
 
-        <DialogFooter className={cn(canSubmitEvent && canSubmitRegular && !loadingDay && "flex-col gap-2 sm:flex-row sm:justify-end")}>
+        <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          {canSubmitEvent && !loadingDay && (
+          {showEventSection && !loadingDay && (
             <Button disabled={saving || !selectedSlotId} onClick={handleEventSubmit}>
               {saving ? "Booking..." : "Book event client"}
             </Button>
           )}
-          {canSubmitRegular && !loadingDay && (
-            <Button
-              variant={canSubmitEvent ? "outline" : "default"}
-              disabled={saving}
-              onClick={handleRegularSubmit}
-            >
+          {showRegularSection && !loadingDay && (
+            <Button disabled={saving} onClick={handleRegularSubmit}>
               {saving ? "Booking..." : "Create Booking"}
             </Button>
           )}

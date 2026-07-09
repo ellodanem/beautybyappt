@@ -5,6 +5,7 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogBody,
   DialogTitle,
 } from "@/components/ui/dialog";
 
@@ -119,6 +120,8 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>Share {name}</DialogTitle>
         </DialogHeader>
+        <DialogBody>
+        <div className="space-y-4 pb-4">
         <p className="text-sm text-muted-foreground">
           Clients can pick a time and book themselves from this link.
         </p>
@@ -135,6 +138,8 @@ export function ShareDialog({
         <Button type="button" className="h-11 w-full" onClick={onWhatsApp}>
           Share on WhatsApp
         </Button>
+        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

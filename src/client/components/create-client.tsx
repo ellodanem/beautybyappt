@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import type { Client } from "../types";
 import { parseRequiredBookingEmail } from "../../shared/email";
 
@@ -33,12 +33,13 @@ export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCr
   };
 
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add Client</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <DialogBody>
+        <div className="space-y-3 pb-4">
           <div className="space-y-1.5">
             <Label>Name *</Label>
             <Input value={name} onChange={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Full name" />
@@ -58,6 +59,7 @@ export function CreateClient({ onClose, onCreated }: { onClose: () => void; onCr
             <Textarea rows={2} value={notes} onChange={(e) => setNotes((e.target as HTMLTextAreaElement).value)} placeholder="Preferences, allergies, etc." />
           </div>
         </div>
+        </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button disabled={saving} onClick={handleSubmit}>{saving ? "Saving..." : "Add Client"}</Button>

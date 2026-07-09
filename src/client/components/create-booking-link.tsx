@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { formatMoney, getCurrency } from "../../shared/currency";
 import {
@@ -140,8 +140,8 @@ export function CreateBookingLink({ onClose, defaultDate }: Props) {
     : 0;
 
   return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Link2 className="h-5 w-5" />
@@ -149,6 +149,7 @@ export function CreateBookingLink({ onClose, defaultDate }: Props) {
           </DialogTitle>
         </DialogHeader>
 
+        <DialogBody>
         {createdUrl ? (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
@@ -373,6 +374,8 @@ export function CreateBookingLink({ onClose, defaultDate }: Props) {
             </p>
           </div>
         )}
+
+        </DialogBody>
 
         <DialogFooter>
           {createdUrl ? (

@@ -1,6 +1,6 @@
 import { formatTimeShort } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { formatMoney } from "../../shared/currency";
 import type { OfferingSlotInstance } from "../types";
 
@@ -19,10 +19,11 @@ export function EventSlotPicker({ slots, onClose, onSelectSlot }: Props) {
         <DialogHeader>
           <DialogTitle>Book event client</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-muted-foreground">
+        <DialogBody>
+        <p className="pb-3 text-sm text-muted-foreground">
           Pick a time slot for {slots[0]?.offering_name ?? "your event"}. This is separate from everyday services.
         </p>
-        <div className="max-h-80 space-y-2 overflow-y-auto">
+        <div className="space-y-2 pb-4">
           {openSlots.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">All slots are full for this day.</p>
           ) : (
@@ -48,7 +49,10 @@ export function EventSlotPicker({ slots, onClose, onSelectSlot }: Props) {
             })
           )}
         </div>
-        <Button variant="outline" className="w-full" onClick={onClose}>Cancel</Button>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={onClose}>Cancel</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

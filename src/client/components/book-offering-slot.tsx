@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { formatMoney } from "../../shared/currency";
 import type { OfferingSlotInstance } from "../types";
 
@@ -71,16 +71,17 @@ export function BookOfferingSlot({ slot, onClose }: BookOfferingSlotProps) {
         <DialogHeader>
           <DialogTitle>Book a client</DialogTitle>
         </DialogHeader>
-        <div className="space-y-1 text-sm text-muted-foreground">
+        <DialogBody>
+        <div className="space-y-1 pb-2 text-sm text-muted-foreground">
           <p className="font-medium text-foreground">{slot.offering_name}</p>
           <p>{slot.slot_date} · {formatTimeShort(slot.start_time)} – {formatTimeShort(slot.end_time)}</p>
           <p>{spotsLeft} spot{spotsLeft === 1 ? "" : "s"} left</p>
         </div>
 
         {isFull ? (
-          <p className="text-destructive">This time is full.</p>
+          <p className="pb-4 text-destructive">This time is full.</p>
         ) : (
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <form id="book-offering-slot-form" className="space-y-4 pb-4" onSubmit={handleSubmit}>
             <div className="space-y-1.5">
               <Label>Client *</Label>
               <select
@@ -129,13 +130,16 @@ export function BookOfferingSlot({ slot, onClose }: BookOfferingSlotProps) {
               <Textarea rows={2} value={notes} onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)} />
             </div>
             <p className="text-sm font-semibold">Total: {formatMoney(totalPrice, slotCurrency)}</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-              <Button type="submit" className="h-12 w-full text-base" disabled={submitting}>
-                {submitting ? "Booking…" : "Book them in"}
-              </Button>
-            </div>
           </form>
+        )}
+        </DialogBody>
+        {!isFull && (
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" form="book-offering-slot-form" className="h-12 text-base" disabled={submitting}>
+              {submitting ? "Booking…" : "Book them in"}
+            </Button>
+          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>

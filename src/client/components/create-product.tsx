@@ -3,7 +3,7 @@ import { useApp } from "../context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 
 export function CreateProduct({ onClose }: { onClose: () => void }) {
   const { addProduct, setError } = useApp();
@@ -37,12 +37,13 @@ export function CreateProduct({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog open onOpenChange={onClose}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>Add Product</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
+        <DialogBody>
+        <div className="space-y-3 pb-4">
           <div className="space-y-1.5">
             <Label>Name *</Label>
             <Input value={name} onChange={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Product name" />
@@ -82,6 +83,7 @@ export function CreateProduct({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         </div>
+        </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button disabled={saving} onClick={handleSubmit}>{saving ? "Saving..." : "Add Product"}</Button>
