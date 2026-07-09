@@ -1,4 +1,4 @@
-import { getDbEngine, query, run } from "./db.js";
+import { getDbEngine, get, query, run } from "./db.js";
 
 let ensured = false;
 
@@ -147,4 +147,23 @@ Time: {time}
 
   await run("CREATE INDEX IF NOT EXISTS idx_notification_rules_offering ON notification_rules(offering_id)");
   await run("CREATE INDEX IF NOT EXISTS idx_appointment_notification_sent_appointment ON appointment_notification_sent(appointment_id)");
+
+  // Everyday appointments created before currency was set used the schema default (USD).
+  const backfilled = await get<{ value: string }>(
+    "SELECT value FROM _meta WHERE key = 'everyday_currency_backfilled'",
+  );
+  if (!backfilled) {
+    const defaultRow = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'default_currency'");
+    const defaultCurrency = defaultRow?.value || "USD";
+    if (defaultCurrency !== "USD") {
+      await run(
+        `UPDATE appointments SET currency = ?
+         WHERE offering_slot_instance_id IS NULL AND currency = 'USD'`,
+        [defaultCurrency],
+      );
+    }
+    await run(
+      "INSERT OR REPLACE INTO _meta (key, value) VALUES ('everyday_currency_backfilled', '1')",
+    );
+  }
 }

@@ -3,7 +3,7 @@ import { initDB, query, get, run } from "./db.js";
 import { ensureSqliteSchema } from "./schema-migrate.js";
 import { addMinutes, nextIdentifier } from "./helpers.js";
 import { registerBookingLinkRoutes } from "./booking-links.js";
-import { registerSettingsRoutes } from "./settings.js";
+import { registerSettingsRoutes, getDefaultCurrency } from "./settings.js";
 import { registerBrandingRoutes } from "./branding.js";
 import { registerOfferingRoutes } from "./offerings.js";
 import { registerAnytimeBookingRoutes } from "./anytime-booking.js";
@@ -847,12 +847,13 @@ app.openapi(createAppointment, async (c) => {
   totalPrice += travelFee;
 
   const endTime = addMinutes(startTime, totalDuration);
+  const currency = await getDefaultCurrency();
 
   const result = await run(
-    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, travel_fee, service_address, notes, is_recurring, recurrence_interval)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, currency, travel_fee, service_address, notes, is_recurring, recurrence_interval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [identifier, body.client_id, body.staff_id ?? null, body.scheduled_date,
-    startTime, endTime, totalPrice, travelFee, body.service_address?.trim() || "",
+    startTime, endTime, totalPrice, currency, travelFee, body.service_address?.trim() || "",
     body.notes || "", body.is_recurring || 0, body.recurrence_interval || ""],
   );
 
