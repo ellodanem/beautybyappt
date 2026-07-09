@@ -91,14 +91,17 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
     return () => { cancelled = true; };
   }, [date]);
 
-  const eventMode = daySlots.length > 0;
+  const hasEventSlots = daySlots.length > 0;
   const selectedSlot = daySlots.find((s) => s.id === selectedSlotId) ?? null;
   const eventCurrency = selectedSlot?.currency ?? daySlots[0]?.currency ?? defaultCurrency;
   const regularBlocked = eventDay.block_regular_bookings && eventDay.is_event_day;
   const draftEventsOnDate = offerings.filter(
     (o) => o.status === "draft" && offeringCoversDate(o.date_summary, date),
   );
-  const showDraftWarning = !eventMode && draftEventsOnDate.length > 0;
+  const showDraftWarning = !hasEventSlots && draftEventsOnDate.length > 0;
+  const canSubmitEvent = hasEventSlots;
+  const canSubmitRegular = !regularBlocked && !showDraftWarning;
+  const eventOnlyMode = hasEventSlots && regularBlocked;
 
   const toggleService = (id: number) => {
     setSelectedServices((prev) =>
@@ -173,27 +176,31 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
   };
 
   const eventName = daySlots[0]?.offering_name ?? eventDay.event_names[0] ?? "Special event";
-  const canSubmitRegular = !regularBlocked && !showDraftWarning && !eventMode;
+  const showForm = canSubmitEvent || canSubmitRegular;
 
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{eventMode ? "Book event client" : "New Booking"}</DialogTitle>
+          <DialogTitle>{eventOnlyMode ? "Book event client" : "New Booking"}</DialogTitle>
         </DialogHeader>
 
         {loadingDay ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading availability…</p>
         ) : (
           <div className="space-y-4">
-            {eventMode && (
+            {hasEventSlots && (
               <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
                 <span
                   className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle"
                   style={{ backgroundColor: daySlots[0]?.offering_color }}
                 />
                 <strong>{eventName}</strong>
-                <span className="text-muted-foreground"> — pick a time slot below</span>
+                <span className="text-muted-foreground">
+                  {canSubmitRegular
+                    ? " — book an event slot below, or an everyday service further down"
+                    : " — pick a time slot below"}
+                </span>
               </div>
             )}
 
@@ -211,14 +218,14 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </div>
             )}
 
-            {regularBlocked && !eventMode && !showDraftWarning && (
+            {regularBlocked && !hasEventSlots && !showDraftWarning && (
               <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
                 Regular services aren&apos;t available on this date
                 {eventDay.event_names.length > 0 && <> ({eventDay.event_names.join(", ")})</>}.
               </p>
             )}
 
-            {(eventMode || canSubmitRegular) && (
+            {showForm && (
               <>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
@@ -264,9 +271,9 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </>
             )}
 
-            {eventMode && (
+            {canSubmitEvent && (
               <div className="space-y-2">
-                <Label>Event time *</Label>
+                <Label>{canSubmitRegular ? "Event booking" : "Event time"} *</Label>
                 <div className="max-h-48 space-y-2 overflow-y-auto">
                   {daySlots.map((slot) => {
                     const spotsLeft = slot.capacity - slot.booked_count;
@@ -324,10 +331,14 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </div>
             )}
 
+            {canSubmitRegular && canSubmitEvent && (
+              <div className="border-t pt-4" />
+            )}
+
             {canSubmitRegular && (
               <>
                 <div className="space-y-1.5">
-                  <Label>Start Time</Label>
+                  <Label>{canSubmitEvent ? "Everyday booking — start time" : "Start Time"}</Label>
                   <Input type="time" value={startTime} onChange={(e) => setStartTime((e.target as HTMLInputElement).value)} />
                 </div>
 
@@ -399,7 +410,7 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
               </>
             )}
 
-            {(eventMode || canSubmitRegular) && (
+            {showForm && (
               <div className="space-y-1.5">
                 <Label>Notes</Label>
                 <Textarea rows={3} placeholder="Special requests, preferences..." value={notes} onChange={(e) => setNotes((e.target as HTMLTextAreaElement).value)} />
@@ -408,15 +419,19 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className={cn(canSubmitEvent && canSubmitRegular && !loadingDay && "flex-col gap-2 sm:flex-row sm:justify-end")}>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          {eventMode && !loadingDay && (
+          {canSubmitEvent && !loadingDay && (
             <Button disabled={saving || !selectedSlotId} onClick={handleEventSubmit}>
               {saving ? "Booking..." : "Book event client"}
             </Button>
           )}
           {canSubmitRegular && !loadingDay && (
-            <Button disabled={saving} onClick={handleRegularSubmit}>
+            <Button
+              variant={canSubmitEvent ? "outline" : "default"}
+              disabled={saving}
+              onClick={handleRegularSubmit}
+            >
               {saving ? "Booking..." : "Create Booking"}
             </Button>
           )}
