@@ -66,6 +66,19 @@ function getServiceGroupMeta(apt: Appointment): { name: string; color: string } 
   return { name: "Other", color: "#6b7280" };
 }
 
+function ServiceIndicator({ apt }: { apt: Appointment }) {
+  const { name, color } = getServiceGroupMeta(apt);
+  return (
+    <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span
+        className="inline-block h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <span className="truncate">{name}</span>
+    </span>
+  );
+}
+
 function groupByServiceType(appointments: Appointment[]): DisplayGroup[] {
   const groups = new Map<string, DisplayGroup>();
   for (const apt of appointments) {
@@ -183,6 +196,8 @@ function AppointmentMobileCard({
 
   now,
 
+  showService,
+
   onOpen,
 
   onDelete,
@@ -194,6 +209,8 @@ function AppointmentMobileCard({
   apt: Appointment;
 
   now: Date;
+
+  showService: boolean;
 
   onOpen: () => void;
 
@@ -238,6 +255,7 @@ function AppointmentMobileCard({
 
         <div className="min-w-0">
           <p className="font-semibold leading-tight">{apt.client_name}</p>
+          {showService && <ServiceIndicator apt={apt} />}
           <AppointmentExtrasChips appointment={apt} />
         </div>
 
@@ -570,6 +588,8 @@ export function AppointmentList() {
 
                       now={now}
 
+                      showService={groupBy === "date"}
+
                       onOpen={() => navigate(`/appointments/${apt.id}`)}
 
                       onDelete={() => deleteAppointment(apt.id)}
@@ -641,6 +661,7 @@ export function AppointmentList() {
                           <TableCell>
                             <div>
                               <span>{apt.client_name}</span>
+                              {groupBy === "date" && <ServiceIndicator apt={apt} />}
                               <AppointmentExtrasChips appointment={apt} />
                             </div>
                           </TableCell>
