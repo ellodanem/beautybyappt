@@ -3,6 +3,7 @@ import { useContext } from "preact/hooks";
 import type {
   Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo, AppointmentConflict,
+  AppointmentServiceLineInput,
 } from "./types";
 import type { CalendarViewMode } from "./lib/calendar-range";
 import type { AppointmentListScope } from "../shared/appointment-scope";
@@ -31,6 +32,7 @@ export interface AppContextValue {
     is_recurring?: number;
     recurrence_interval?: string;
     service_ids?: number[];
+    services?: AppointmentServiceLineInput[];
     travel_fee?: number;
     service_address?: string;
   }) => Promise<void>;

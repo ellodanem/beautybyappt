@@ -511,8 +511,9 @@ async function loadAppointmentTemplateContext(appointmentId: number) {
   if (!apt) return null;
 
   const services = await query<{ name: string }>(
-    `SELECT s.name FROM appointment_services aps
-     JOIN services s ON s.id = aps.service_id
+    `SELECT COALESCE(NULLIF(aps.service_name, ''), s.name) as name
+     FROM appointment_services aps
+     LEFT JOIN services s ON s.id = aps.service_id
      WHERE aps.appointment_id = ?`,
     [appointmentId],
   );

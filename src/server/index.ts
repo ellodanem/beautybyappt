@@ -126,11 +126,18 @@ const AppointmentNoteSchema = z.object({
 const AppointmentServiceSchema = z.object({
   id: z.number().int(),
   appointment_id: z.number().int(),
-  service_id: z.number().int(),
+  service_id: z.number().int().nullable(),
   service_name: z.string().optional(),
   price: z.number(),
   duration: z.number().int(),
 }).openapi("AppointmentService");
+
+const AppointmentServiceLineInputSchema = z.object({
+  service_id: z.number().int().optional(),
+  name: z.string().optional(),
+  price: z.number().optional(),
+  duration: z.number().int().positive().optional(),
+});
 
 const AppointmentOfferingAddonSchema = z.object({
   id: z.number().int(),
@@ -408,11 +415,11 @@ app.openapi(listAppointments, async (c) => {
             s.name as staff_name, s.color as staff_color,
             si.offering_id as offering_id,
             o.name as offering_name, o.color as offering_color,
-            (SELECT sv.name FROM appointment_services aps
+            (SELECT COALESCE(NULLIF(aps.service_name, ''), sv.name) FROM appointment_services aps
              LEFT JOIN services sv ON sv.id = aps.service_id
              WHERE aps.appointment_id = a.id
              ORDER BY aps.id LIMIT 1) as service_name,
-            (SELECT sv.color FROM appointment_services aps
+            (SELECT COALESCE(sv.color, '#6b7280') FROM appointment_services aps
              LEFT JOIN services sv ON sv.id = aps.service_id
              WHERE aps.appointment_id = a.id
              ORDER BY aps.id LIMIT 1) as service_color,
@@ -518,7 +525,8 @@ app.openapi(getCalendar, async (c) => {
   // Attach services to each appointment
   for (const apt of appointments) {
     const svcs = await query<Record<string, unknown>>(
-      `SELECT aps.*, sv.name as service_name FROM appointment_services aps
+      `SELECT aps.*, COALESCE(NULLIF(aps.service_name, ''), sv.name) as service_name
+       FROM appointment_services aps
        LEFT JOIN services sv ON sv.id = aps.service_id
        WHERE aps.appointment_id = ?`,
       [apt.id],
@@ -568,7 +576,8 @@ app.openapi(getAppointment, async (c) => {
   if (!apt) return c.json({ error: "Not found" }, 404);
 
   const svcs = await query<Record<string, unknown>>(
-    `SELECT aps.*, sv.name as service_name FROM appointment_services aps
+    `SELECT aps.*, COALESCE(NULLIF(aps.service_name, ''), sv.name) as service_name
+     FROM appointment_services aps
      LEFT JOIN services sv ON sv.id = aps.service_id
      WHERE aps.appointment_id = ?`,
     [id],
@@ -815,6 +824,7 @@ const createAppointment = createRoute({
       is_recurring: z.number().int().optional(),
       recurrence_interval: z.string().optional(),
       service_ids: z.array(z.number().int()).optional(),
+      services: z.array(AppointmentServiceLineInputSchema).optional(),
       travel_fee: z.number().optional(),
       service_address: z.string().optional(),
     }) } } },
@@ -841,23 +851,66 @@ app.openapi(createAppointment, async (c) => {
   }
   const identifier = await nextIdentifier();
   const startTime = body.start_time || "09:00";
-
-  // Calculate total duration and price from services
-  let totalDuration = 60;
-  let totalPrice = 0;
-  const serviceIds = body.service_ids || [];
   const travelFee = Math.max(0, body.travel_fee ?? 0);
 
-  if (serviceIds.length > 0) {
-    const svcs = await query<{ duration: number; price: number }>(
-      `SELECT duration, price FROM services WHERE id IN (${serviceIds.map(() => "?").join(",")})`,
-      serviceIds,
-    );
-    totalDuration = svcs.reduce((sum, s) => sum + s.duration, 0);
-    totalPrice = svcs.reduce((sum, s) => sum + s.price, 0);
+  type ResolvedLine = {
+    service_id: number | null;
+    service_name: string;
+    price: number;
+    duration: number;
+  };
+  const lines: ResolvedLine[] = [];
+
+  if (body.services && body.services.length > 0) {
+    for (const line of body.services) {
+      if (line.service_id != null) {
+        const svc = await get<{ name: string; duration: number; price: number }>(
+          "SELECT name, duration, price FROM services WHERE id = ?",
+          [line.service_id],
+        );
+        if (!svc) return c.json({ error: `Service ${line.service_id} not found` }, 400);
+        lines.push({
+          service_id: line.service_id,
+          service_name: svc.name,
+          price: line.price != null ? Math.max(0, line.price) : svc.price,
+          duration: line.duration != null ? line.duration : svc.duration,
+        });
+      } else {
+        const name = line.name?.trim() || "";
+        if (!name) return c.json({ error: "One-time services need a name" }, 400);
+        if (line.price == null || line.duration == null) {
+          return c.json({ error: "One-time services need a price and duration" }, 400);
+        }
+        lines.push({
+          service_id: null,
+          service_name: name,
+          price: Math.max(0, line.price),
+          duration: line.duration,
+        });
+      }
+    }
+  } else {
+    const serviceIds = body.service_ids || [];
+    for (const svcId of serviceIds) {
+      const svc = await get<{ name: string; duration: number; price: number }>(
+        "SELECT name, duration, price FROM services WHERE id = ?",
+        [svcId],
+      );
+      if (svc) {
+        lines.push({
+          service_id: svcId,
+          service_name: svc.name,
+          price: svc.price,
+          duration: svc.duration,
+        });
+      }
+    }
   }
 
-  totalPrice += travelFee;
+  const totalDuration = lines.length > 0
+    ? lines.reduce((sum, line) => sum + line.duration, 0)
+    : 60;
+  const totalPrice = lines.reduce((sum, line) => sum + line.price, 0) + travelFee;
 
   const endTime = addMinutes(startTime, totalDuration);
   const currency = await getDefaultCurrency();
@@ -872,15 +925,11 @@ app.openapi(createAppointment, async (c) => {
 
   const aptId = result.lastInsertRowid;
 
-  // Insert appointment services
-  for (const svcId of serviceIds) {
-    const svc = await get<{ duration: number; price: number }>("SELECT duration, price FROM services WHERE id = ?", [svcId]);
-    if (svc) {
-      await run(
-        "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
-        [aptId, svcId, svc.price, svc.duration],
-      );
-    }
+  for (const line of lines) {
+    await run(
+      "INSERT INTO appointment_services (appointment_id, service_id, service_name, price, duration) VALUES (?, ?, ?, ?, ?)",
+      [aptId, line.service_id, line.service_name, line.price, line.duration],
+    );
   }
 
   const apt = await get<Record<string, unknown>>(

@@ -282,8 +282,8 @@ export async function createAnytimeAppointment(opts: {
 
   const aptId = result.lastInsertRowid;
   await run(
-    "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
-    [aptId, opts.service.id, opts.service.price, opts.service.duration],
+    "INSERT INTO appointment_services (appointment_id, service_id, service_name, price, duration) VALUES (?, ?, ?, ?, ?)",
+    [aptId, opts.service.id, opts.service.name, opts.service.price, opts.service.duration],
   );
 
   for (const addon of selectedAddons) {

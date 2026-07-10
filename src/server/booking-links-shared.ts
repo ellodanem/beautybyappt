@@ -114,14 +114,14 @@ export async function createAppointmentForLink(
   const aptId = Number(result.lastInsertRowid);
 
   if (serviceIds.length > 0) {
-    const svcs = await query<{ id: number; duration: number; price: number }>(
-      `SELECT id, duration, price FROM services WHERE id IN (${serviceIds.map(() => "?").join(",")})`,
+    const svcs = await query<{ id: number; name: string; duration: number; price: number }>(
+      `SELECT id, name, duration, price FROM services WHERE id IN (${serviceIds.map(() => "?").join(",")})`,
       serviceIds,
     );
     for (const svc of svcs) {
       await run(
-        "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
-        [aptId, svc.id, svc.price, svc.duration],
+        "INSERT INTO appointment_services (appointment_id, service_id, service_name, price, duration) VALUES (?, ?, ?, ?, ?)",
+        [aptId, svc.id, svc.name, svc.price, svc.duration],
       );
     }
   }

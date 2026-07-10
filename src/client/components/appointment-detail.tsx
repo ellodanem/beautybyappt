@@ -599,7 +599,7 @@ export function AppointmentDetail() {
                 <>
                   {apt.appointment_services.map((svc) => (
                     <div key={svc.id} className="flex items-center justify-between text-sm">
-                      <span>{svc.service_name || `Service #${svc.service_id}`}</span>
+                      <span>{svc.service_name || (svc.service_id != null ? `Service #${svc.service_id}` : "One-time service")}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">{svc.duration}min</span>
                         <span className="font-medium">{formatMoney(svc.price, currency)}</span>

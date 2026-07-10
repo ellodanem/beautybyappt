@@ -68,10 +68,12 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 
 -- Services included in an appointment (many-to-many)
+-- service_id is nullable for one-time custom lines; service_name is a booking-time snapshot.
 CREATE TABLE IF NOT EXISTS appointment_services (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
-  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+  service_name TEXT NOT NULL DEFAULT '',
   price REAL NOT NULL DEFAULT 0,
   duration INTEGER NOT NULL DEFAULT 60
 );

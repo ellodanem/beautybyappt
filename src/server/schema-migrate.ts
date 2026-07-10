@@ -148,6 +148,36 @@ Time: {time}
   await run("CREATE INDEX IF NOT EXISTS idx_notification_rules_offering ON notification_rules(offering_id)");
   await run("CREATE INDEX IF NOT EXISTS idx_appointment_notification_sent_appointment ON appointment_notification_sent(appointment_id)");
 
+  // One-time custom services: nullable service_id + name snapshot on appointment_services.
+  const apsCols = await query<{ name: string; notnull: number }>("PRAGMA table_info(appointment_services)");
+  if (apsCols.length > 0) {
+    const hasServiceName = apsCols.some((c) => c.name === "service_name");
+    const serviceIdNotNull = apsCols.some((c) => c.name === "service_id" && c.notnull === 1);
+    if (!hasServiceName || serviceIdNotNull) {
+      await run(`CREATE TABLE appointment_services_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        appointment_id INTEGER NOT NULL REFERENCES appointments(id) ON DELETE CASCADE,
+        service_id INTEGER REFERENCES services(id) ON DELETE CASCADE,
+        service_name TEXT NOT NULL DEFAULT '',
+        price REAL NOT NULL DEFAULT 0,
+        duration INTEGER NOT NULL DEFAULT 60
+      )`);
+      await run(`INSERT INTO appointment_services_new (id, appointment_id, service_id, service_name, price, duration)
+        SELECT
+          aps.id,
+          aps.appointment_id,
+          aps.service_id,
+          COALESCE(${hasServiceName ? "NULLIF(aps.service_name, '')," : ""} sv.name, ''),
+          aps.price,
+          aps.duration
+        FROM appointment_services aps
+        LEFT JOIN services sv ON sv.id = aps.service_id`);
+      await run("DROP TABLE appointment_services");
+      await run("ALTER TABLE appointment_services_new RENAME TO appointment_services");
+      await run("CREATE INDEX IF NOT EXISTS idx_appointment_services_apt ON appointment_services(appointment_id)");
+    }
+  }
+
   // Everyday appointments created before currency was set used the schema default (USD).
   const backfilled = await get<{ value: string }>(
     "SELECT value FROM _meta WHERE key = 'everyday_currency_backfilled'",

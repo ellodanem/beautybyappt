@@ -58,10 +58,17 @@ export interface Appointment {
 export interface AppointmentService {
   id: number;
   appointment_id: number;
-  service_id: number;
+  service_id: number | null;
   service_name?: string;
   price: number;
   duration: number;
+}
+
+export interface AppointmentServiceLineInput {
+  service_id?: number;
+  name?: string;
+  price?: number;
+  duration?: number;
 }
 
 export interface AppointmentOfferingAddon {

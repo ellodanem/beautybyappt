@@ -149,8 +149,8 @@ async function loadAppointmentForPayment(appointmentId: number): Promise<Appoint
             cl.name as client_name, cl.email as client_email,
             s.name as staff_name,
             o.name as offering_name,
-            (SELECT sv.name FROM appointment_services aps
-             JOIN services sv ON sv.id = aps.service_id
+            (SELECT COALESCE(NULLIF(aps.service_name, ''), sv.name) FROM appointment_services aps
+             LEFT JOIN services sv ON sv.id = aps.service_id
              WHERE aps.appointment_id = a.id
              ORDER BY aps.id LIMIT 1) as service_name
      FROM appointments a

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "preact/hooks";
-import { Plus } from "lucide-preact";
+import { Plus, X } from "lucide-preact";
 import { useApp } from "../context";
 import { api } from "../api";
 import { Button } from "@/components/ui/button";
@@ -10,12 +10,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFoo
 import { cn, formatTimeShort } from "@/lib/utils";
 import { formatMoney } from "../../shared/currency";
 import { CreateClient } from "./create-client";
-import type { OfferingSlotInstance, EventDayInfo } from "../types";
+import type { OfferingSlotInstance, EventDayInfo, AppointmentServiceLineInput } from "../types";
 
 interface Props {
   onClose: () => void;
   defaultDate?: string;
 }
+
+type CatalogLine = {
+  key: string;
+  kind: "catalog";
+  serviceId: number;
+  price: number;
+};
+
+type CustomLine = {
+  key: string;
+  kind: "custom";
+  name: string;
+  duration: number;
+  price: number;
+};
+
+type BookingLine = CatalogLine | CustomLine;
 
 function offeringCoversDate(dateSummary: string, date: string): boolean {
   if (!dateSummary) return false;
@@ -31,6 +48,8 @@ function offeringCoversDate(dateSummary: string, date: string): boolean {
   return false;
 }
 
+let customLineSeq = 0;
+
 export function CreateAppointment({ onClose, defaultDate }: Props) {
   const {
     addAppointment, clientLookup, staffLookup, services, setError,
@@ -41,7 +60,11 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
   const [staffId, setStaffId] = useState("");
   const [date, setDate] = useState(defaultDate || new Date().toISOString().split("T")[0]);
   const [startTime, setStartTime] = useState("09:00");
-  const [selectedServices, setSelectedServices] = useState<number[]>([]);
+  const [bookingLines, setBookingLines] = useState<BookingLine[]>([]);
+  const [showCustomForm, setShowCustomForm] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customDuration, setCustomDuration] = useState("60");
+  const [customPrice, setCustomPrice] = useState("");
   const [notes, setNotes] = useState("");
   const [addTravelFee, setAddTravelFee] = useState(false);
   const [travelFeeAmount, setTravelFeeAmount] = useState("");
@@ -115,26 +138,87 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
     }
   }, [date, canSubmitEvent, canSubmitRegular]);
 
+  const selectedServiceIds = useMemo(
+    () => new Set(
+      bookingLines
+        .filter((line): line is CatalogLine => line.kind === "catalog")
+        .map((line) => line.serviceId),
+    ),
+    [bookingLines],
+  );
+
   const toggleService = (id: number) => {
-    setSelectedServices((prev) =>
-      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
-    );
+    setBookingLines((prev) => {
+      if (prev.some((line) => line.kind === "catalog" && line.serviceId === id)) {
+        return prev.filter((line) => !(line.kind === "catalog" && line.serviceId === id));
+      }
+      const svc = services.find((s) => s.id === id);
+      if (!svc) return prev;
+      return [...prev, {
+        key: `catalog-${id}`,
+        kind: "catalog" as const,
+        serviceId: id,
+        price: svc.price,
+      }];
+    });
+  };
+
+  const setCatalogPrice = (serviceId: number, priceText: string) => {
+    const parsed = parseFloat(priceText);
+    setBookingLines((prev) => prev.map((line) => {
+      if (line.kind !== "catalog" || line.serviceId !== serviceId) return line;
+      return { ...line, price: Number.isFinite(parsed) ? Math.max(0, parsed) : 0 };
+    }));
+  };
+
+  const resetCatalogPrice = (serviceId: number) => {
+    const svc = services.find((s) => s.id === serviceId);
+    if (!svc) return;
+    setCatalogPrice(serviceId, String(svc.price));
+  };
+
+  const removeLine = (key: string) => {
+    setBookingLines((prev) => prev.filter((line) => line.key !== key));
+  };
+
+  const addCustomService = () => {
+    const name = customName.trim();
+    const duration = parseInt(customDuration, 10);
+    const price = parseFloat(customPrice);
+    if (!name) { setError("Enter a name for the one-time service"); return; }
+    if (!Number.isFinite(duration) || duration <= 0) { setError("Enter a valid duration"); return; }
+    if (!Number.isFinite(price) || price < 0) { setError("Enter a valid price"); return; }
+    customLineSeq += 1;
+    setBookingLines((prev) => [...prev, {
+      key: `custom-${customLineSeq}`,
+      kind: "custom" as const,
+      name,
+      duration,
+      price,
+    }]);
+    setCustomName("");
+    setCustomDuration("60");
+    setCustomPrice("");
+    setShowCustomForm(false);
   };
 
   const toggleAddon = (id: number) => {
     setSelectedAddons((prev) => (prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]));
   };
 
-  const serviceSubtotal = services
-    .filter((s) => selectedServices.includes(s.id))
-    .reduce((sum, s) => sum + s.price, 0);
-
+  const serviceSubtotal = bookingLines.reduce((sum, line) => sum + line.price, 0);
   const parsedTravelFee = addTravelFee && travelFeeAmount !== "" ? parseFloat(travelFeeAmount) || 0 : 0;
   const totalPrice = serviceSubtotal + parsedTravelFee;
-
-  const totalDuration = services
-    .filter((s) => selectedServices.includes(s.id))
-    .reduce((sum, s) => sum + s.duration, 0);
+  const totalDuration = bookingLines.reduce((sum, line) => {
+    if (line.kind === "custom") return sum + line.duration;
+    const svc = services.find((s) => s.id === line.serviceId);
+    return sum + (svc?.duration ?? 0);
+  }, 0);
+  const hasCustomPrice = bookingLines.some((line) => {
+    if (line.kind !== "catalog") return false;
+    const svc = services.find((s) => s.id === line.serviceId);
+    return svc != null && line.price !== svc.price;
+  });
 
   const eventTotalPrice = useMemo(() => {
     if (!selectedSlot) return 0;
@@ -150,13 +234,19 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
     if (!clientId) { setError("Please select a client"); return; }
     setSaving(true);
     try {
+      const servicesPayload: AppointmentServiceLineInput[] = bookingLines.map((line) => {
+        if (line.kind === "catalog") {
+          return { service_id: line.serviceId, price: line.price };
+        }
+        return { name: line.name, price: line.price, duration: line.duration };
+      });
       await addAppointment({
         client_id: parseInt(clientId),
         staff_id: staffId ? parseInt(staffId) : null,
         scheduled_date: date,
         start_time: startTime,
         notes,
-        service_ids: selectedServices,
+        services: servicesPayload,
         travel_fee: parsedTravelFee > 0 ? parsedTravelFee : undefined,
         service_address: serviceAddress.trim() || undefined,
       });
@@ -396,7 +486,7 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                         type="button"
                         className={cn(
                           "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-                          selectedServices.includes(svc.id)
+                          selectedServiceIds.has(svc.id)
                             ? "border-primary bg-primary/5 text-primary"
                             : "border-border bg-background text-muted-foreground hover:border-primary/50",
                         )}
@@ -407,16 +497,152 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                         <span className="text-[10px] opacity-70">{svc.duration}m &middot; {formatMoney(svc.price, defaultCurrency)}</span>
                       </button>
                     ))}
-                  </div>
-                  {selectedServices.length > 0 && (
-                    <p className="text-xs font-medium text-primary">
-                      Total: {totalDuration} min
-                      {parsedTravelFee > 0 ? (
-                        <> · {formatMoney(serviceSubtotal, defaultCurrency)} + {formatMoney(parsedTravelFee, defaultCurrency)} travel = {formatMoney(totalPrice, defaultCurrency)}</>
-                      ) : (
-                        <> · {formatMoney(totalPrice, defaultCurrency)}</>
+                    <button
+                      type="button"
+                      className={cn(
+                        "rounded-full border border-dashed px-3 py-1 text-xs font-medium transition-colors",
+                        showCustomForm
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
                       )}
-                    </p>
+                      onClick={() => setShowCustomForm((open) => !open)}
+                    >
+                      + One-time service
+                    </button>
+                  </div>
+
+                  {showCustomForm && (
+                    <div className="mt-2 space-y-2 rounded-lg border border-dashed p-3">
+                      <div className="flex items-center justify-between">
+                        <Label>One-time service</Label>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => setShowCustomForm(false)}
+                          aria-label="Close one-time service form"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <Input
+                        placeholder="Service name"
+                        value={customName}
+                        onChange={(e) => setCustomName((e.target as HTMLInputElement).value)}
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Duration (min)</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={customDuration}
+                            onChange={(e) => setCustomDuration((e.target as HTMLInputElement).value)}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Price</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            placeholder="0.00"
+                            value={customPrice}
+                            onChange={(e) => setCustomPrice((e.target as HTMLInputElement).value)}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Only for this booking — not added to your service list</p>
+                      <Button type="button" size="sm" onClick={addCustomService}>Add to booking</Button>
+                    </div>
+                  )}
+
+                  {bookingLines.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <Label>This booking</Label>
+                      <div className="divide-y rounded-lg border">
+                        {bookingLines.map((line) => {
+                          if (line.kind === "catalog") {
+                            const svc = services.find((s) => s.id === line.serviceId);
+                            if (!svc) return null;
+                            const overridden = line.price !== svc.price;
+                            return (
+                              <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                                <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
+                                <span className="min-w-0 flex-1 font-medium">{svc.name}</span>
+                                <span className="text-xs text-muted-foreground">{svc.duration} min</span>
+                                {overridden && (
+                                  <span className="text-xs text-muted-foreground line-through">
+                                    {formatMoney(svc.price, defaultCurrency)}
+                                  </span>
+                                )}
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  className="h-8 w-24"
+                                  value={Number.isFinite(line.price) ? String(line.price) : ""}
+                                  onChange={(e) => setCatalogPrice(line.serviceId, (e.target as HTMLInputElement).value)}
+                                  aria-label={`Price for ${svc.name}`}
+                                />
+                                {overridden ? (
+                                  <>
+                                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                      Custom price
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                                      onClick={() => resetCatalogPrice(line.serviceId)}
+                                    >
+                                      Reset
+                                    </button>
+                                  </>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  onClick={() => removeLine(line.key)}
+                                  aria-label={`Remove ${svc.name}`}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+                              <span className="inline-block h-2 w-2 shrink-0 rounded-full border border-dashed border-muted-foreground" />
+                              <span className="min-w-0 flex-1 font-medium">{line.name}</span>
+                              <span className="text-xs text-muted-foreground">{line.duration} min</span>
+                              <span className="font-medium">{formatMoney(line.price, defaultCurrency)}</span>
+                              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                One-time
+                              </span>
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground"
+                                onClick={() => removeLine(line.key)}
+                                aria-label={`Remove ${line.name}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs font-medium text-primary">
+                        Total: {totalDuration} min
+                        {parsedTravelFee > 0 ? (
+                          <> · {formatMoney(serviceSubtotal, defaultCurrency)} + {formatMoney(parsedTravelFee, defaultCurrency)} travel = {formatMoney(totalPrice, defaultCurrency)}</>
+                        ) : (
+                          <> · {formatMoney(totalPrice, defaultCurrency)}</>
+                        )}
+                      </p>
+                      {(hasCustomPrice || bookingLines.some((l) => l.kind === "custom")) && (
+                        <p className="text-xs text-muted-foreground">Catalog prices unchanged</p>
+                      )}
+                    </div>
                   )}
                 </div>
 
