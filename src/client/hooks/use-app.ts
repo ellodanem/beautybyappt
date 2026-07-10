@@ -107,6 +107,12 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       has_password: false,
     },
   });
+  const [calendarSettings, setCalendarSettings] = useState({
+    google_oauth_available: false,
+    connected: false,
+    address: "",
+    calendar_id: "primary",
+  });
   const [emailTemplates, setEmailTemplates] = useState<{
     id: number;
     slug: string;
@@ -349,6 +355,16 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     setEmailSettings(data);
   }, []);
 
+  const fetchCalendarSettings = useCallback(async () => {
+    const data = await api<typeof calendarSettings>("GET", "/api/settings/calendar");
+    setCalendarSettings(data);
+  }, []);
+
+  const disconnectGoogleCalendar = useCallback(async () => {
+    const data = await api<typeof calendarSettings>("DELETE", "/api/settings/calendar/google");
+    setCalendarSettings(data);
+  }, []);
+
   const updateEmailProvider = useCallback(async (provider: "google" | "resend" | "smtp") => {
     const data = await api<typeof emailSettings>("PUT", "/api/settings/email/provider", { provider });
     setEmailSettings(data);
@@ -568,6 +584,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
           fetchNotificationSettings(),
           fetchEmailDomain(),
           fetchEmailSettings(),
+          fetchCalendarSettings(),
           fetchEmailTemplates(),
         ]);
       } catch (err) {
@@ -867,6 +884,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     notificationSettings, updateNotificationSettings,
     emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
     emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail, fetchEmailSettings,
+    calendarSettings, fetchCalendarSettings, disconnectGoogleCalendar,
     emailTemplates, emailTemplatePlaceholders, fetchEmailTemplates,
     createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
     fetchEmailTestAppointments, sendTestEmailTemplate,

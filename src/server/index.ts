@@ -14,6 +14,12 @@ import { attachReminderStatusToAppointments, buildAppointmentReminderStatus } fr
 import { registerEmailTemplateRoutes } from "./email-templates.js";
 import { registerEmailDomainRoutes } from "./email-domain.js";
 import { registerEmailProviderRoutes } from "./email-settings.js";
+import { registerGoogleCalendarRoutes } from "./calendar-settings.js";
+import {
+  scheduleGoogleCalendarAppointmentSync,
+  scheduleGoogleCalendarEventDelete,
+  scheduleGoogleCalendarBlockedSync,
+} from "./calendar-sync.js";
 import { backfillServiceSlugs, uniqueServiceSlug, syncServiceAddons, loadServiceAddons } from "./services.js";
 import { assertRegularBookingAllowed, getEventDayInfo } from "./event-override.js";
 import { derivePaymentStatus } from "../shared/payment.js";
@@ -251,6 +257,7 @@ registerNotificationRoutes(app);
 registerEmailTemplateRoutes(app);
 registerEmailDomainRoutes(app);
 registerEmailProviderRoutes(app);
+registerGoogleCalendarRoutes(app);
 registerOfferingRoutes(app);
 registerAnytimeBookingRoutes(app);
 
@@ -807,6 +814,7 @@ app.openapi(updateAppointmentAddons, async (c) => {
     [totalPrice, endTime, id],
   );
 
+  scheduleGoogleCalendarAppointmentSync(c, id);
   return c.json({ ok: true }, 200);
 });
 
@@ -1019,6 +1027,7 @@ app.openapi(updateAppointment, async (c) => {
     sets.push("updated_at = datetime('now')");
     await run(`UPDATE appointments SET ${sets.join(", ")} WHERE id = ?`, [...params, id]);
   }
+  scheduleGoogleCalendarAppointmentSync(c, id);
   return c.json({ ok: true }, 200);
 });
 
@@ -1032,13 +1041,14 @@ const deleteAppointment = createRoute({
 
 app.openapi(deleteAppointment, async (c) => {
   const { id } = c.req.valid("param");
-  const apt = await get<{ offering_slot_instance_id: number | null }>(
-    "SELECT offering_slot_instance_id FROM appointments WHERE id = ?",
+  const apt = await get<{ offering_slot_instance_id: number | null; google_event_id: string | null }>(
+    "SELECT offering_slot_instance_id, google_event_id FROM appointments WHERE id = ?",
     [id],
   );
   if (!apt) return c.json({ error: "Not found" }, 404);
 
   try {
+    scheduleGoogleCalendarEventDelete(c, apt.google_event_id);
     await run("UPDATE booking_links SET appointment_id = NULL WHERE appointment_id = ?", [id]);
     if (apt.offering_slot_instance_id) {
       await run(
@@ -1616,10 +1626,11 @@ const createBlockedSlot = createRoute({
 
 app.openapi(createBlockedSlot, async (c) => {
   const body = c.req.valid("json");
-  await run(
+  const result = await run(
     "INSERT INTO blocked_slots (staff_id, blocked_date, start_time, end_time, reason) VALUES (?, ?, ?, ?, ?)",
     [body.staff_id, body.blocked_date, body.start_time, body.end_time, body.reason || ""],
   );
+  scheduleGoogleCalendarBlockedSync(c, result.lastInsertRowid);
   return c.json({ ok: true }, 201);
 });
 
@@ -1632,6 +1643,11 @@ const deleteBlockedSlot = createRoute({
 
 app.openapi(deleteBlockedSlot, async (c) => {
   const { id } = c.req.valid("param");
+  const slot = await get<{ google_event_id: string | null }>(
+    "SELECT google_event_id FROM blocked_slots WHERE id = ?",
+    [id],
+  );
+  scheduleGoogleCalendarEventDelete(c, slot?.google_event_id);
   await run("DELETE FROM blocked_slots WHERE id = ?", [id]);
   return c.json({ ok: true }, 200);
 });

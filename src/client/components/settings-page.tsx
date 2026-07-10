@@ -57,6 +57,9 @@ export function SettingsPage() {
     clearSmtpSettings,
     sendTestEmail,
     fetchEmailSettings,
+    calendarSettings,
+    fetchCalendarSettings,
+    disconnectGoogleCalendar,
   } = useApp();
 
 
@@ -84,6 +87,8 @@ export function SettingsPage() {
   const [testEmailSaving, setTestEmailSaving] = useState(false);
   const [testEmailSaved, setTestEmailSaved] = useState(false);
   const [gmailConnectedBanner, setGmailConnectedBanner] = useState(false);
+  const [calendarConnectedBanner, setCalendarConnectedBanner] = useState(false);
+  const [calendarDisconnecting, setCalendarDisconnecting] = useState(false);
   const [smtpHost, setSmtpHost] = useState("");
   const [smtpPort, setSmtpPort] = useState("587");
   const [smtpSecure, setSmtpSecure] = useState(false);
@@ -170,7 +175,9 @@ export function SettingsPage() {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get("email_connected");
     const emailError = params.get("email_error");
-    if (!connected && !emailError) return;
+    const calendarConnected = params.get("calendar_connected");
+    const calendarError = params.get("calendar_error");
+    if (!connected && !emailError && !calendarConnected && !calendarError) return;
 
     void (async () => {
       if (connected === "google") {
@@ -187,13 +194,28 @@ export function SettingsPage() {
         };
         setError(messages[emailError] || decodeURIComponent(emailError));
       }
+      if (calendarConnected) {
+        await fetchCalendarSettings();
+        setCalendarConnectedBanner(true);
+        setTimeout(() => setCalendarConnectedBanner(false), 4000);
+      }
+      if (calendarError) {
+        const messages: Record<string, string> = {
+          google_not_configured: "Google sign-in is not set up on this server yet.",
+          google_denied: "Google Calendar connection was cancelled.",
+          invalid_oauth_state: "Calendar connection expired — click Connect and try again.",
+        };
+        setError(messages[calendarError] || decodeURIComponent(calendarError));
+      }
 
       params.delete("email_connected");
       params.delete("email_error");
+      params.delete("calendar_connected");
+      params.delete("calendar_error");
       const next = `${window.location.pathname}${params.toString() ? `?${params}` : ""}`;
       window.history.replaceState(null, "", next);
     })();
-  }, [setError, fetchEmailSettings, updateNotificationSettings]);
+  }, [setError, fetchEmailSettings, fetchCalendarSettings, updateNotificationSettings]);
 
   const providerLabel = (provider: string) => {
     if (provider === "google") return "Gmail";
@@ -1072,6 +1094,79 @@ export function SettingsPage() {
           </div>
 
           {(emailDomainSaving || emailProviderSaving || smtpSaving) && <p className="text-muted-foreground">Working…</p>}
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-lg">
+        <CardHeader>
+          <CardTitle className="text-base">Google Calendar</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <p className="text-muted-foreground">
+            Push appointments and blocked time to one salon Google Calendar. Events show the client name, service, and travel address when applicable.
+          </p>
+          {calendarConnectedBanner && (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">
+              Google Calendar connected successfully.
+            </p>
+          )}
+          <div className="rounded-lg border p-3 space-y-1">
+            <p>
+              <span className="font-medium">Status: </span>
+              {calendarSettings.connected
+                ? <span className="text-emerald-700">Connected</span>
+                : <span className="text-amber-700">Not connected</span>}
+            </p>
+            {calendarSettings.connected && (
+              <p>
+                <span className="font-medium">Account: </span>
+                <span className="text-emerald-700">{calendarSettings.address}</span>
+              </p>
+            )}
+          </div>
+          {!calendarSettings.google_oauth_available && (
+            <p className="text-xs text-amber-700">Google sign-in is not configured on this server yet.</p>
+          )}
+          {calendarSettings.connected ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11"
+                onClick={() => { window.location.href = "/api/settings/calendar/google/auth"; }}
+                disabled={!calendarSettings.google_oauth_available}
+              >
+                Reconnect
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11"
+                disabled={calendarDisconnecting}
+                onClick={async () => {
+                  setCalendarDisconnecting(true);
+                  try {
+                    await disconnectGoogleCalendar();
+                  } catch (err) {
+                    setError((err as Error).message);
+                  } finally {
+                    setCalendarDisconnecting(false);
+                  }
+                }}
+              >
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              className="h-11"
+              disabled={!calendarSettings.google_oauth_available}
+              onClick={() => { window.location.href = "/api/settings/calendar/google/auth"; }}
+            >
+              Connect Google Calendar
+            </Button>
+          )}
         </CardContent>
       </Card>
 

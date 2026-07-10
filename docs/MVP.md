@@ -122,6 +122,8 @@ See [Feature C — Stripe integration](#feature-c--stripe-integration) for full 
 | Conflict check | Warn or block if staff already booked at that time |
 | Link management | List / revoke / resend links from staff UI |
 
+> **Later — migrate to Clerk (not A3).** Keep the shared `ADMIN_PASSWORD` + JWT session for now. When multi-user matters (makeup studio, event collaborators), replace staff auth with [Clerk Organizations](https://clerk.com/docs/guides/organizations/overview): solo artists = one user / one org; studios = invite members with roles. Map `clerk_org_id` → business tenant and `clerk_user_id` → `staff` row. Public booking clients stay outside Clerk. Per-staff Google Calendar OAuth (Feature F) becomes natural once each staff member has their own login.
+
 ## User flows (Feature A)
 
 ### Staff — create link (~30 sec)
@@ -773,23 +775,33 @@ Many artists manage personal availability in Google Calendar. Duplicating bookin
 | Area | Scope |
 |------|--------|
 | Direction | **v1: one-way push** (Open Salon → Google); two-way sync is v2+ |
-| Per staff | Each staff member connects their Google account (OAuth) |
+| Account | **Salon-wide** one Google account (Settings → Connect). Per-staff OAuth after Clerk migration. |
 | Events | Create / update / delete Google event when appointment changes |
-| Event details | Title (client + service), time, location (client address), notes |
-| Offerings | Carnival blocks appear as busy or named events on sync |
+| Event details | Title: **client name — service(s)**; location: **travel address when travel fee > 0**; notes/staff in description |
+| Blocked time | Push `blocked_slots` as “Blocked — {reason}” events |
+| Offerings | Carnival blocks appear as busy or named events on sync *(F3)* |
+
+## Decisions (2026-07-10)
+
+- [x] One Google account for the salon (adjust to per-staff with Clerk later)
+- [x] Show client name on Google events
+- [x] Location on event when travel / on-location (service or client address)
+- [x] Sync blocked time as well as appointments
 
 ## Phases
 
-### F1 — OAuth connect
+### F1 — OAuth connect ✅
 
-- Staff settings: “Connect Google Calendar”
-- Store refresh token securely (encrypted / Wrangler secret per staff)
+- Settings: “Connect Google Calendar”
+- Store refresh token in `_meta` (`gcal_refresh_token_enc`, encrypted)
 - Google Calendar API scope: `calendar.events`
+- Separate from Gmail OAuth tokens
 
-### F2 — Push on appointment CRUD
+### F2 — Push on appointment + blocked CRUD ✅
 
 - On create/update/cancel appointment → upsert/delete Google event
-- Store `google_event_id` on appointment for idempotent updates
+- On create/delete blocked slot → upsert/delete Google event
+- Store `google_event_id` on `appointments` and `blocked_slots`
 
 ### F3 — Offering / busy blocks
 
@@ -800,36 +812,40 @@ Many artists manage personal availability in Google Calendar. Duplicating bookin
 - Import Google busy times as `blocked_slots`
 - Conflict detection when booking
 
-## Data model (proposed)
+## Data model
 
 ```sql
-ALTER TABLE staff ADD COLUMN google_refresh_token TEXT;  -- encrypt at rest
-ALTER TABLE staff ADD COLUMN google_calendar_id TEXT DEFAULT 'primary';
+-- salon-wide connection in _meta:
+-- gcal_refresh_token_enc, gcal_address, gcal_calendar_id (default 'primary')
 ALTER TABLE appointments ADD COLUMN google_event_id TEXT;
+ALTER TABLE blocked_slots ADD COLUMN google_event_id TEXT;
 ```
 
-## API endpoints (proposed)
+## API endpoints
 
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| `GET` | `/api/staff/:id/google/auth` | Staff | Start OAuth flow |
-| `GET` | `/api/staff/google/callback` | Google | OAuth callback |
-| `DELETE` | `/api/staff/:id/google` | Staff | Disconnect |
+| `GET` | `/api/settings/calendar` | Staff | Connection status |
+| `GET` | `/api/settings/calendar/google/auth` | Staff | Start OAuth flow |
+| `GET` | `/api/settings/calendar/google/callback` | Google | OAuth callback |
+| `DELETE` | `/api/settings/calendar/google` | Staff | Disconnect |
 | `POST` | `/api/appointments/:id/sync-google` | Staff | Manual re-sync |
 
 ## Open questions
 
-- [ ] One Google account per staff or shared salon calendar?
-- [ ] Event visibility: private vs show client name?
-- [ ] Sync travel time as separate calendar block?
+- [x] One Google account per staff or shared salon calendar? → **Salon-wide for now**
+- [x] Event visibility: private vs show client name? → **Show client name**
+- [x] Sync travel time as separate calendar block? → **Location on event only (no separate travel block)**
 - [ ] Token refresh failure handling + staff alert
 
 ## Acceptance criteria
 
-- [ ] Staff can connect Google account once
-- [ ] New appointment appears on Google Calendar within ~1 min
-- [ ] Cancelled appointment removes Google event
-- [ ] Update to time/date updates existing Google event (no duplicates)
+- [x] Staff can connect Google account once
+- [x] New appointment appears on Google Calendar (async push)
+- [x] Cancelled appointment removes Google event
+- [x] Update to time/date updates existing Google event (no duplicates)
+- [x] Blocked time syncs to Google
+- [x] Travel bookings include address as event location
 
 ---
 
@@ -908,7 +924,7 @@ CREATE TABLE travel_zones (
 - [x] Travel fee included in Stripe checkout total (Feature C)
 - [x] Travel fee and address appear on confirmation email (Feature D)
 - [x] Travel fee and address appear on reminder (Feature E)
-- [ ] Google Calendar event location set to client address when present (Feature F)
+- [x] Google Calendar event location set to client address when present (Feature F)
 
 ---
 
@@ -1053,7 +1069,7 @@ Client-facing UI     → business name + logo (H) on links, offerings, emails
 | Authentication | None |
 | Stripe / payments | None |
 | Email / reminders | None |
-| Google Calendar sync | None |
+| Google Calendar sync | ✅ Local (F1–F2 salon-wide) |
 | Offering Stripe checkout (C2) | ✅ Local |
 | Anytime service Stripe checkout | ✅ Local |
 | Travel fee | None |
@@ -1088,7 +1104,7 @@ Client-facing UI     → business name + logo (H) on links, offerings, emails
 8. ~~**E1** — Email reminders (24h / 2h before)~~ ✅
 9. ~~**B2** — Public offering booking~~ ✅
 10. ~~**C2** — Stripe on offering bookings (B4)~~ ✅
-11. **F1–F2** — Google Calendar connect + push sync
+11. ~~**F1–F2** — Google Calendar connect + push sync~~ ✅
 12. **A3** — Auth and hardening
 13. **B3** — Year-over-year templates
 14. **H3–H4, C3, D2–D3, E3, F3–F4, G2–G3** — Email/checkout branding, custom domain, refunds, SMS, two-way sync, zone fees
@@ -1189,6 +1205,7 @@ Fold into B2/C2 implementation rather than building separately.
 | Topic | Why it matters |
 |-------|----------------|
 | **Auth (A3)** | Public booking exposes client PII; don’t defer too long |
+| **Clerk (later)** | Solo-first today; Organizations when studios / collaborators need real multi-user (see A3 note). Don’t block F1–F2 on it. |
 | **DB migrations** | Many new tables coming; plan before real Carnival data |
 | **Currency** | XCD vs USD display; Stripe settlement currency |
 | **License** | MIT vs AGPL in repo — before commercial product |
@@ -1309,6 +1326,8 @@ Phase 3  → Evaluate native app only after real usage data
 | 2026-06-26 | **D1 implemented:** Booking confirmation email via Resend; SMS/WhatsApp placeholder channels; Settings toggles; fires on all booking flows without blocking. |
 | 2026-06-26 | **E1 implemented:** 24h/2h email reminders via hourly cron; balance-due block for deposit payers only; Settings reminder toggles. |
 | 2026-06-26 | **D3 domain connect:** Resend DNS verification in Settings; custom from address once verified; confirmations/reminders use business domain. |
+| 2026-07-10 | **Clerk (later):** Noted under A3 + Foundations — migrate from shared admin password to Clerk Organizations for solo-first / optional studio multi-user; pairs with per-staff Google Calendar. |
+| 2026-07-10 | **F1–F2 implemented:** Salon-wide Google Calendar OAuth; push appointments (client + service, travel location) and blocked time; `google_event_id` columns. |
 
 ## References
 

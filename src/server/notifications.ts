@@ -631,6 +631,11 @@ export function scheduleBookingConfirmation(
   } else {
     void task.catch((err) => console.error("[notifications] confirmation failed:", err));
   }
+
+  // Push to Google Calendar when connected (covers all booking create paths).
+  void import("./calendar-sync.js").then(({ scheduleGoogleCalendarAppointmentSync }) => {
+    scheduleGoogleCalendarAppointmentSync(ctx, appointmentId);
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

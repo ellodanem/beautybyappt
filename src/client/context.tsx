@@ -118,6 +118,15 @@ export interface AppContextValue {
   sendTestEmail: (to?: string) => Promise<void>;
   fetchEmailSettings: () => Promise<void>;
 
+  calendarSettings: {
+    google_oauth_available: boolean;
+    connected: boolean;
+    address: string;
+    calendar_id: string;
+  };
+  fetchCalendarSettings: () => Promise<void>;
+  disconnectGoogleCalendar: () => Promise<void>;
+
   emailTemplates: {
     id: number;
     slug: string;

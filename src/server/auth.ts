@@ -18,6 +18,7 @@ const PUBLIC_API_EXACT = new Set([
   "/api/auth/logout",
   "/api/auth/me",
   "/api/settings/email/google/callback",
+  "/api/settings/calendar/google/callback",
 ]);
 
 const PUBLIC_API_PREFIXES = [

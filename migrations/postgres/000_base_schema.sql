@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   offering_slot_instance_id BIGINT,
   reminder_24h_sent_at TEXT,
   reminder_2h_sent_at TEXT,
+  google_event_id TEXT,
   created_at TEXT NOT NULL DEFAULT (NOW()::text),
   updated_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS blocked_slots (
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   reason TEXT NOT NULL DEFAULT '',
+  google_event_id TEXT,
   created_at TEXT NOT NULL DEFAULT (NOW()::text)
 );
 

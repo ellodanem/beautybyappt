@@ -196,4 +196,18 @@ Time: {time}
       "INSERT OR REPLACE INTO _meta (key, value) VALUES ('everyday_currency_backfilled', '1')",
     );
   }
+
+  const aptCols = await query<{ name: string }>("PRAGMA table_info(appointments)");
+  if (aptCols.length > 0 && !aptCols.some((c) => c.name === "google_event_id")) {
+    await run("ALTER TABLE appointments ADD COLUMN google_event_id TEXT");
+  }
+
+  const blockedCols = await query<{ name: string }>("PRAGMA table_info(blocked_slots)");
+  if (blockedCols.length > 0 && !blockedCols.some((c) => c.name === "google_event_id")) {
+    await run("ALTER TABLE blocked_slots ADD COLUMN google_event_id TEXT");
+  }
+
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_refresh_token_enc', '')");
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_address', '')");
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_calendar_id', 'primary')");
 }

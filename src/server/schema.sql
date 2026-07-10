@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   offering_slot_instance_id INTEGER,
   reminder_24h_sent_at TEXT,
   reminder_2h_sent_at TEXT,
+  google_event_id TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS blocked_slots (
   start_time TEXT NOT NULL,
   end_time TEXT NOT NULL,
   reason TEXT DEFAULT '',
+  google_event_id TEXT,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -142,6 +144,9 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_from_address', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_provider', 'google');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('gmail_address', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('gmail_refresh_token_enc', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_refresh_token_enc', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_address', '');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_calendar_id', 'primary');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_host', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_port', '587');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_secure', '0');

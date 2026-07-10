@@ -12,7 +12,9 @@ APP_URL=http://localhost:5173
 
 
 # Booking confirmation emails
-# Recommended: connect Gmail in Settings (needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET below)
+# Recommended: connect Gmail / Google Calendar in Settings (needs GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET below)
+# Also enable Google Calendar API in Cloud Console and add redirect URI:
+#   {APP_URL}/api/settings/calendar/google/callback
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
