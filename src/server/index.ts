@@ -20,6 +20,7 @@ import { derivePaymentStatus } from "../shared/payment.js";
 import { loadPendingPaymentSummary } from "./appointment-payments.js";
 import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate, assertClientEmailForBooking } from "./clients.js";
 import { parseRequiredBookingEmail } from "../shared/email.js";
+import { statusesForScope } from "../shared/appointment-scope.js";
 import { deleteStaffCascade } from "./staff.js";
 import { registerAuthRoutes, createAuthMiddleware } from "./auth.js";
 
@@ -355,6 +356,7 @@ const listAppointments = createRoute({
       limit: z.string().optional(),
       search: z.string().optional(),
       status: z.string().optional(),
+      scope: z.enum(["upcoming", "completed"]).optional(),
       date: z.string().optional(),
       staff_id: z.string().optional(),
     }),
@@ -381,9 +383,20 @@ app.openapi(listAppointments, async (c) => {
     const s = `%${q.search}%`;
     params.push(s, s);
   }
-  if (q.status) { where += " AND a.status = ?"; params.push(q.status); }
+  if (q.status) {
+    where += " AND a.status = ?";
+    params.push(q.status);
+  } else if (q.scope) {
+    const scopeStatuses = statusesForScope(q.scope);
+    where += ` AND a.status IN (${scopeStatuses.map(() => "?").join(", ")})`;
+    params.push(...scopeStatuses);
+  }
   if (q.date) { where += " AND a.scheduled_date = ?"; params.push(q.date); }
   if (q.staff_id) { where += " AND a.staff_id = ?"; params.push(q.staff_id); }
+
+  const orderBy = q.scope === "upcoming"
+    ? "ORDER BY a.scheduled_date ASC, a.start_time ASC"
+    : "ORDER BY a.scheduled_date DESC, a.start_time ASC";
 
   const total = await get<{ count: number }>(
     `SELECT COUNT(*) as count FROM appointments a LEFT JOIN clients cl ON cl.id = a.client_id ${where}`,
@@ -412,7 +425,7 @@ app.openapi(listAppointments, async (c) => {
      LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
      LEFT JOIN offerings o ON o.id = si.offering_id
      ${where}
-     ORDER BY a.scheduled_date DESC, a.start_time ASC
+     ${orderBy}
      LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );

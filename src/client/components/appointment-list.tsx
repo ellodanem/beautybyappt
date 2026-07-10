@@ -24,8 +24,15 @@ import { CreateAppointment } from "./create-appointment";
 
 import { MobileNavTrigger } from "./mobile-nav-trigger";
 
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 import { cn, formatDateShort, formatTimeShort } from "@/lib/utils";
 import { needsCloseOut } from "../../shared/appointment-closeout";
+import {
+  COMPLETED_APPOINTMENT_STATUSES,
+  UPCOMING_APPOINTMENT_STATUSES,
+  type AppointmentListScope,
+} from "../../shared/appointment-scope";
 import { CloseOutRowActions, useCloseOutClock } from "./close-out-row-actions";
 import { AppointmentExtrasChips } from "./appointment-extras-chips";
 import { AppointmentReminderIndicator } from "./appointment-reminder-indicator";
@@ -85,6 +92,22 @@ function getAppointmentListNote(apt: Appointment): string | null {
     .filter((line) => line && !BOILERPLATE_NOTE.test(line));
   const text = userLines.join(" · ").trim();
   return text || null;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  booked: "Booked",
+  confirmed: "Confirmed",
+  in_progress: "In Progress",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  no_show: "No Show",
+};
+
+function scopeStatusOptions(scope: AppointmentListScope) {
+  const statuses = scope === "upcoming"
+    ? UPCOMING_APPOINTMENT_STATUSES
+    : COMPLETED_APPOINTMENT_STATUSES;
+  return statuses.map((status) => ({ value: status, label: STATUS_LABELS[status] || status }));
 }
 
 
@@ -270,6 +293,7 @@ export function AppointmentList() {
     appointmentsSearch, setAppointmentsSearch,
 
     appointmentsStatusFilter, setAppointmentsStatusFilter,
+    appointmentsScope, setAppointmentsScope,
 
     deleteAppointment, navigate, updateAppointment,
 
@@ -287,6 +311,12 @@ export function AppointmentList() {
     [appointments],
 
   );
+
+  const statusOptions = useMemo(() => scopeStatusOptions(appointmentsScope), [appointmentsScope]);
+
+  const emptyMessage = appointmentsScope === "upcoming"
+    ? "No upcoming appointments"
+    : "No completed appointments";
 
 
 
@@ -315,6 +345,18 @@ export function AppointmentList() {
 
 
       {showCreate && <CreateAppointment onClose={() => setShowCreate(false)} />}
+
+
+
+      <Tabs
+        value={appointmentsScope}
+        onValueChange={(value) => setAppointmentsScope(value as AppointmentListScope)}
+      >
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
 
 
@@ -350,17 +392,9 @@ export function AppointmentList() {
 
           <option value="">All Statuses</option>
 
-          <option value="booked">Booked</option>
-
-          <option value="confirmed">Confirmed</option>
-
-          <option value="in_progress">In Progress</option>
-
-          <option value="completed">Completed</option>
-
-          <option value="cancelled">Cancelled</option>
-
-          <option value="no_show">No Show</option>
+          {statusOptions.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
 
         </select>
 
@@ -374,7 +408,7 @@ export function AppointmentList() {
 
           <CardContent className="py-8 text-center text-muted-foreground">
 
-            No appointments found
+            {emptyMessage}
 
           </CardContent>
 

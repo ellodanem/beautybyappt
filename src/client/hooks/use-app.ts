@@ -6,6 +6,7 @@ import type {
 } from "../types";
 import type { AppContextValue } from "../context";
 import { getCalendarRange, type CalendarViewMode } from "../lib/calendar-range";
+import type { AppointmentListScope } from "../../shared/appointment-scope";
 
 export function useAppState(isAgent: boolean, navigate: (to: string) => void): AppContextValue {
   const [stats, setStats] = useState<Stats>({ appointments: 0, clients: 0, staff: 0, services: 0, products: 0, today_appointments: 0, upcoming_appointments: 0, completed_appointments: 0, revenue: 0, low_stock_products: 0, pending_payments: 0, week_revenue: 0, week_revenue_by_day: [] });
@@ -17,6 +18,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [appointmentsPag, setAppointmentsPag] = useState<PaginatedState>({ page: 1, limit: 50, total: 0 });
   const [appointmentsSearch, setAppointmentsSearch] = useState("");
   const [appointmentsStatusFilter, setAppointmentsStatusFilter] = useState("");
+  const [appointmentsScope, setAppointmentsScopeState] = useState<AppointmentListScope>("upcoming");
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
   // Calendar
@@ -199,8 +201,13 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     setStats(data);
   }, []);
 
-  const fetchAppointments = useCallback(async (pag: PaginatedState, search: string, status: string) => {
-    const params = new URLSearchParams({ page: String(pag.page), limit: String(pag.limit) });
+  const fetchAppointments = useCallback(async (
+    pag: PaginatedState,
+    search: string,
+    status: string,
+    scope: AppointmentListScope,
+  ) => {
+    const params = new URLSearchParams({ page: String(pag.page), limit: String(pag.limit), scope });
     if (search) params.set("search", search);
     if (status) params.set("status", status);
     const data = await api<{ appointments: Appointment[]; total: number }>("GET", `/api/appointments?${params}`);
@@ -544,7 +551,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       try {
         await Promise.all([
           fetchStats(),
-          fetchAppointments(appointmentsPag, "", ""),
+          fetchAppointments(appointmentsPag, "", "", "upcoming"),
           fetchCalendar(calendarDate),
           fetchClients(clientsPag, ""),
           fetchStaff(),
@@ -571,8 +578,8 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter).catch((err) => setError((err as Error).message));
-  }, [appointmentsPag.page, appointmentsSearch, appointmentsStatusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope).catch((err) => setError((err as Error).message));
+  }, [appointmentsPag.page, appointmentsSearch, appointmentsStatusFilter, appointmentsScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchCalendar(calendarDate, calendarView).catch((err) => setError((err as Error).message));
@@ -590,15 +597,21 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const setAppointmentsPage = useCallback((page: number) => setAppointmentsPag((p) => ({ ...p, page })), []);
 
+  const setAppointmentsScope = useCallback((scope: AppointmentListScope) => {
+    setAppointmentsScopeState(scope);
+    setAppointmentsStatusFilter("");
+    setAppointmentsPag((p) => ({ ...p, page: 1 }));
+  }, []);
+
   const addAppointment = useCallback(async (data: {
     client_id: number; staff_id?: number | null; scheduled_date: string;
     start_time?: string; notes?: string; is_recurring?: number; recurrence_interval?: string;
     service_ids?: number[]; travel_fee?: number; service_address?: string;
   }) => {
     await api("POST", "/api/appointments", data);
-    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope);
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
-  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const createBookingLink = useCallback(async (data: {
     staff_id: number;
@@ -624,23 +637,23 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const updateAppointment = useCallback(async (id: number, data: Partial<Appointment>) => {
     await api("PUT", `/api/appointments/${id}`, data);
-    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope);
     if (selectedAppointment && selectedAppointment.id === id) {
       const res = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
       setSelectedAppointment(res.appointment);
     }
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
-  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const updateAppointmentAddons = useCallback(async (id: number, addonIds: number[]) => {
     await api("PUT", `/api/appointments/${id}/addons`, { addon_ids: addonIds });
-    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+    await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope);
     if (selectedAppointment && selectedAppointment.id === id) {
       const res = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
       setSelectedAppointment(res.appointment);
     }
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
-  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope, selectedAppointment, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const deleteAppointment = useCallback(async (id: number) => {
     if (!confirm("Delete this appointment? This cannot be undone.")) return;
@@ -648,12 +661,12 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       setError(null);
       await api("DELETE", `/api/appointments/${id}`);
       if (selectedAppointment && selectedAppointment.id === id) { setSelectedAppointment(null); navigate("/appointments"); }
-      await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
+      await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope);
       await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
     } catch (err) {
       setError((err as Error).message);
     }
-  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, navigate, fetchAppointments, fetchStats, fetchCalendar]);
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope, selectedAppointment, calendarDate, navigate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const selectAppointment = useCallback(async (id: number | null) => {
     if (id === null) { setSelectedAppointment(null); return; }
@@ -830,6 +843,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     navigate, isAgent, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
+    appointmentsScope, setAppointmentsScope,
     addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote, sendAppointmentPaymentLink,
     sendAppointmentTemplateEmail,

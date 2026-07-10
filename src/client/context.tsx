@@ -5,6 +5,7 @@ import type {
   ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo, AppointmentConflict,
 } from "./types";
 import type { CalendarViewMode } from "./lib/calendar-range";
+import type { AppointmentListScope } from "../shared/appointment-scope";
 
 export interface AppContextValue {
   navigate: (to: string) => void;
@@ -19,6 +20,8 @@ export interface AppContextValue {
   setAppointmentsSearch: (s: string) => void;
   appointmentsStatusFilter: string;
   setAppointmentsStatusFilter: (s: string) => void;
+  appointmentsScope: AppointmentListScope;
+  setAppointmentsScope: (scope: AppointmentListScope) => void;
   addAppointment: (data: {
     client_id: number;
     staff_id?: number | null;
