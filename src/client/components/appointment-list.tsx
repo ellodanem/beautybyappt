@@ -2,7 +2,7 @@ import { useMemo, useState } from "preact/hooks";
 
 import { useApp } from "../context";
 
-import { Plus, Search, Trash2 } from "lucide-preact";
+import { Calendar, Plus, Search, Trash2 } from "lucide-preact";
 
 import { Button } from "@/components/ui/button";
 
@@ -40,10 +40,14 @@ import type { Appointment, AppointmentStatus } from "../types";
 
 
 
-interface ServiceGroup {
+type AppointmentGroupBy = "date" | "service";
+
+interface DisplayGroup {
   name: string;
   color: string;
   appointments: Appointment[];
+  /** Optional secondary line shown next to the header (e.g. the concrete date). */
+  subtitle?: string;
 }
 
 function getServiceGroupMeta(apt: Appointment): { name: string; color: string } {
@@ -62,8 +66,8 @@ function getServiceGroupMeta(apt: Appointment): { name: string; color: string } 
   return { name: "Other", color: "#6b7280" };
 }
 
-function groupByServiceType(appointments: Appointment[]): ServiceGroup[] {
-  const groups = new Map<string, ServiceGroup>();
+function groupByServiceType(appointments: Appointment[]): DisplayGroup[] {
+  const groups = new Map<string, DisplayGroup>();
   for (const apt of appointments) {
     const { name, color } = getServiceGroupMeta(apt);
     const existing = groups.get(name);
@@ -75,6 +79,67 @@ function groupByServiceType(appointments: Appointment[]): ServiceGroup[] {
     if (b.name === "Other") return -1;
     return a.name.localeCompare(b.name);
   });
+}
+
+const DATE_GROUP_COLORS: Record<string, string> = {
+  Overdue: "#dc2626",
+  Today: "#7c3aed",
+  Tomorrow: "#2563eb",
+  "This Week": "#0d9488",
+  "Next Week": "#4f46e5",
+  Later: "#6b7280",
+  Yesterday: "#2563eb",
+  "Earlier This Week": "#0d9488",
+  Earlier: "#6b7280",
+};
+
+const SINGLE_DAY_GROUPS = new Set(["Overdue", "Today", "Tomorrow", "Yesterday"]);
+
+/** Whole-day difference between a "YYYY-MM-DD" date and today (negative = past). */
+function daysFromToday(dateStr: string): number {
+  const d = new Date(`${dateStr}T12:00:00`);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
+  return Math.round((d.getTime() - today.getTime()) / 86_400_000);
+}
+
+function dateGroupLabel(diff: number, scope: AppointmentListScope): string {
+  if (scope === "completed") {
+    if (diff >= 0) return "Today";
+    if (diff === -1) return "Yesterday";
+    if (diff >= -7) return "Earlier This Week";
+    return "Earlier";
+  }
+  if (diff < 0) return "Overdue";
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  if (diff <= 7) return "This Week";
+  if (diff <= 14) return "Next Week";
+  return "Later";
+}
+
+/** e.g. "Fri, 10 Jul" */
+function formatGroupDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function groupByDate(appointments: Appointment[], scope: AppointmentListScope): DisplayGroup[] {
+  // Appointments arrive pre-sorted chronologically from the server, so Map
+  // insertion order already yields the correct group order for both scopes.
+  const groups = new Map<string, DisplayGroup>();
+  for (const apt of appointments) {
+    const label = dateGroupLabel(daysFromToday(apt.scheduled_date), scope);
+    const existing = groups.get(label);
+    if (existing) existing.appointments.push(apt);
+    else groups.set(label, { name: label, color: DATE_GROUP_COLORS[label] || "#6b7280", appointments: [apt] });
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    subtitle: SINGLE_DAY_GROUPS.has(group.name)
+      ? formatGroupDate(group.appointments[0].scheduled_date)
+      : undefined,
+  }));
 }
 
 
@@ -302,14 +367,26 @@ export function AppointmentList() {
   const [showCreate, setShowCreate] = useState(false);
   const now = useCloseOutClock();
 
+  const [groupBy, setGroupBy] = useState<AppointmentGroupBy>(() => {
+    if (typeof localStorage === "undefined") return "date";
+    return localStorage.getItem("appointments:groupBy") === "service" ? "service" : "date";
+  });
 
+  const handleGroupByChange = (value: string) => {
+    const next: AppointmentGroupBy = value === "service" ? "service" : "date";
+    setGroupBy(next);
+    try {
+      localStorage.setItem("appointments:groupBy", next);
+    } catch {
+      // ignore persistence failures (e.g. private mode)
+    }
+  };
 
   const groupedAppointments = useMemo(
-
-    () => groupByServiceType(appointments),
-
-    [appointments],
-
+    () => (groupBy === "service"
+      ? groupByServiceType(appointments)
+      : groupByDate(appointments, appointmentsScope)),
+    [appointments, groupBy, appointmentsScope],
   );
 
   const statusOptions = useMemo(() => scopeStatusOptions(appointmentsScope), [appointmentsScope]);
@@ -361,6 +438,19 @@ export function AppointmentList() {
 
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+
+        <div className="flex shrink-0 items-center gap-2">
+
+          <span className="hidden text-sm text-muted-foreground sm:inline">Group by</span>
+
+          <Tabs value={groupBy} onValueChange={handleGroupByChange}>
+            <TabsList className="grid h-9 w-full grid-cols-2 sm:w-auto">
+              <TabsTrigger value="date">By date</TabsTrigger>
+              <TabsTrigger value="service">By service</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+        </div>
 
         <div className="relative flex-1">
 
@@ -435,21 +525,30 @@ export function AppointmentList() {
 
                   <div className="flex items-center gap-2.5">
 
-                    <span
-                      className="h-3 w-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: group.color }}
-                    />
+                    {groupBy === "date" ? (
+                      <Calendar className="h-4 w-4 shrink-0" style={{ color: group.color }} />
+                    ) : (
+                      <span
+                        className="h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: group.color }}
+                      />
+                    )}
 
                     <h2
                       className="text-base font-semibold md:text-lg"
                       style={{ color: group.name === "Other" ? undefined : group.color }}
                     >
                       {group.name}
+                      {group.subtitle && (
+                        <span className="ml-2 text-sm font-normal text-muted-foreground">
+                          · {group.subtitle}
+                        </span>
+                      )}
                     </h2>
 
                   </div>
 
-                  <p className="mt-0.5 pl-5 text-xs text-muted-foreground md:pl-6">
+                  <p className="mt-0.5 pl-6 text-xs text-muted-foreground">
 
                     {group.appointments.length} appointment{group.appointments.length === 1 ? "" : "s"}
 
