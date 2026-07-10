@@ -479,28 +479,28 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
 
                 <div className="space-y-1.5">
                   <Label>Everyday services</Label>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2.5">
                     {services.filter((s) => s.active).map((svc) => (
                       <button
                         key={svc.id}
                         type="button"
                         className={cn(
-                          "flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                          "flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors",
                           selectedServiceIds.has(svc.id)
                             ? "border-primary bg-primary/5 text-primary"
                             : "border-border bg-background text-muted-foreground hover:border-primary/50",
                         )}
                         onClick={() => toggleService(svc.id)}
                       >
-                        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: svc.color }} />
+                        <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
                         {svc.name}
-                        <span className="text-[10px] opacity-70">{svc.duration}m &middot; {formatMoney(svc.price, defaultCurrency)}</span>
+                        <span className="text-xs opacity-70">{svc.duration}m &middot; {formatMoney(svc.price, defaultCurrency)}</span>
                       </button>
                     ))}
                     <button
                       type="button"
                       className={cn(
-                        "rounded-full border border-dashed px-3 py-1 text-xs font-medium transition-colors",
+                        "min-h-10 rounded-full border border-dashed px-3.5 py-2 text-sm font-medium transition-colors",
                         showCustomForm
                           ? "border-primary bg-primary/5 text-primary"
                           : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground",
@@ -517,7 +517,7 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                         <Label>One-time service</Label>
                         <button
                           type="button"
-                          className="text-muted-foreground hover:text-foreground"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                           onClick={() => setShowCustomForm(false)}
                           aria-label="Close one-time service form"
                         >
@@ -566,8 +566,8 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                             if (!svc) return null;
                             const overridden = line.price !== svc.price;
                             return (
-                              <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                                <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
+                              <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
+                                <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: svc.color }} />
                                 <span className="min-w-0 flex-1 font-medium">{svc.name}</span>
                                 <span className="text-xs text-muted-foreground">{svc.duration} min</span>
                                 {overridden && (
@@ -579,19 +579,19 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                                   type="number"
                                   step="0.01"
                                   min={0}
-                                  className="h-8 w-24"
+                                  className="h-9 w-24"
                                   value={Number.isFinite(line.price) ? String(line.price) : ""}
                                   onChange={(e) => setCatalogPrice(line.serviceId, (e.target as HTMLInputElement).value)}
                                   aria-label={`Price for ${svc.name}`}
                                 />
                                 {overridden ? (
                                   <>
-                                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                                       Custom price
                                     </span>
                                     <button
                                       type="button"
-                                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                                      className="min-h-9 px-1 text-xs text-muted-foreground underline hover:text-foreground"
                                       onClick={() => resetCatalogPrice(line.serviceId)}
                                     >
                                       Reset
@@ -600,32 +600,32 @@ export function CreateAppointment({ onClose, defaultDate }: Props) {
                                 ) : null}
                                 <button
                                   type="button"
-                                  className="text-muted-foreground hover:text-foreground"
+                                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                                   onClick={() => removeLine(line.key)}
                                   aria-label={`Remove ${svc.name}`}
                                 >
-                                  <X className="h-3.5 w-3.5" />
+                                  <X className="h-4 w-4" />
                                 </button>
                               </div>
                             );
                           }
 
                           return (
-                            <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
-                              <span className="inline-block h-2 w-2 shrink-0 rounded-full border border-dashed border-muted-foreground" />
+                            <div key={line.key} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
+                              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-dashed border-muted-foreground" />
                               <span className="min-w-0 flex-1 font-medium">{line.name}</span>
                               <span className="text-xs text-muted-foreground">{line.duration} min</span>
                               <span className="font-medium">{formatMoney(line.price, defaultCurrency)}</span>
-                              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
                                 One-time
                               </span>
                               <button
                                 type="button"
-                                className="text-muted-foreground hover:text-foreground"
+                                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                                 onClick={() => removeLine(line.key)}
                                 aria-label={`Remove ${line.name}`}
                               >
-                                <X className="h-3.5 w-3.5" />
+                                <X className="h-4 w-4" />
                               </button>
                             </div>
                           );
