@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { CreateAppointment } from "./create-appointment";
 import { CreateBookingLink } from "./create-booking-link";
 import { BookOfferingSlot } from "./book-offering-slot";
+import { ManageEventSlot } from "./manage-event-slot";
 import { MobileNavTrigger } from "./mobile-nav-trigger";
 import { StatusBadge } from "./status-badge";
 import { CloseOutRowActions, useCloseOutClock } from "./close-out-row-actions";
@@ -316,11 +317,10 @@ function CalendarWeekGrid({
                       backgroundColor: `${slot.offering_color}18`,
                       borderLeftColor: slot.offering_color,
                     }}
-                    onClick={() => !full && onOpenOfferingSlot(slot)}
-                    disabled={full}
+                    onClick={() => onOpenOfferingSlot(slot)}
                   >
                     <div className="truncate font-medium">{slot.offering_name}</div>
-                    <div>{slot.booked_count}/{slot.capacity}</div>
+                    <div>{slot.booked_count}/{slot.capacity}{full ? " · Full" : ""}</div>
                   </button>
                 );
               })}
@@ -661,8 +661,7 @@ function CalendarMobileAgenda({
               full && "opacity-60",
             )}
             style={{ borderLeftColor: slot.offering_color }}
-            onClick={() => !full && onOpenOfferingSlot(slot)}
-            disabled={full}
+            onClick={() => onOpenOfferingSlot(slot)}
           >
             <p className="mb-1 text-sm font-medium text-muted-foreground">
               {formatTimeShort(slot.start_time)} – {formatTimeShort(slot.end_time)}
@@ -670,7 +669,7 @@ function CalendarMobileAgenda({
             <p className="mb-1 font-semibold leading-tight">{slot.offering_name}</p>
             <p className="text-sm text-muted-foreground">
               {slot.booked_count}/{slot.capacity} booked
-              {full ? " · Full" : " · Tap to book"}
+              {full ? " · Full · Tap to manage" : " · Tap to manage"}
             </p>
           </button>
         );
@@ -689,7 +688,8 @@ export function CalendarView() {
   const [showCreate, setShowCreate] = useState(false);
   const [showBookingLink, setShowBookingLink] = useState(false);
   const [showBlockForm, setShowBlockForm] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState<OfferingSlotInstance | null>(null);
+  const [manageSlot, setManageSlot] = useState<OfferingSlotInstance | null>(null);
+  const [bookSlot, setBookSlot] = useState<OfferingSlotInstance | null>(null);
   const [blockStaff, setBlockStaff] = useState("");
   const [blockStart, setBlockStart] = useState("12:00");
   const [blockEnd, setBlockEnd] = useState("13:00");
@@ -945,7 +945,17 @@ export function CalendarView() {
 
       {showCreate && <CreateAppointment onClose={() => setShowCreate(false)} defaultDate={calendarDate} />}
       {showBookingLink && <CreateBookingLink onClose={() => setShowBookingLink(false)} defaultDate={calendarDate} />}
-      {selectedSlot && <BookOfferingSlot slot={selectedSlot} onClose={() => setSelectedSlot(null)} />}
+      {manageSlot && (
+        <ManageEventSlot
+          slot={manageSlot}
+          onClose={() => setManageSlot(null)}
+          onBookClient={() => {
+            setBookSlot(manageSlot);
+            setManageSlot(null);
+          }}
+        />
+      )}
+      {bookSlot && <BookOfferingSlot slot={bookSlot} onClose={() => setBookSlot(null)} />}
 
       <div className="md:hidden">
         {calendarView === "day" && (
@@ -953,7 +963,7 @@ export function CalendarView() {
             items={agendaItems}
             now={now}
             onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
-            onOpenOfferingSlot={setSelectedSlot}
+            onOpenOfferingSlot={setManageSlot}
             onDeleteBlock={deleteBlockedSlot}
             onCloseOut={(id, status) => updateAppointment(id, { status })}
           />
@@ -968,7 +978,7 @@ export function CalendarView() {
             staffLookup={staffLookup}
             now={now}
             onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
-            onOpenOfferingSlot={setSelectedSlot}
+            onOpenOfferingSlot={setManageSlot}
             onDeleteBlock={deleteBlockedSlot}
             onCloseOut={(id, status) => updateAppointment(id, { status })}
             onSelectDay={selectDay}
@@ -1003,7 +1013,7 @@ export function CalendarView() {
             totalHeight={weekTotalHeight}
             now={now}
             onOpenAppointment={(id) => navigate(`/appointments/${id}`)}
-            onOpenOfferingSlot={setSelectedSlot}
+            onOpenOfferingSlot={setManageSlot}
             onDeleteBlock={deleteBlockedSlot}
             onCloseOut={(id, status) => updateAppointment(id, { status })}
             onSelectDay={selectDay}
@@ -1039,7 +1049,7 @@ export function CalendarView() {
           <div className="flex min-w-[200px] flex-1 flex-col border-r bg-muted/10">
             <div className="border-b bg-muted/20 px-3 py-2.5 text-center">
               <span className="text-sm font-medium">Event times</span>
-              <p className="text-[10px] text-muted-foreground">Tap a slot to book</p>
+              <p className="text-[10px] text-muted-foreground">Tap a slot to manage</p>
             </div>
             <div className="relative" style={{ height: totalHeight }}>
               {HOURS.map((h) => (
@@ -1069,12 +1079,11 @@ export function CalendarView() {
                       backgroundColor: `${slot.offering_color}18`,
                       borderLeftColor: slot.offering_color,
                     }}
-                    onClick={() => !full && setSelectedSlot(slot)}
-                    disabled={full}
+                    onClick={() => setManageSlot(slot)}
                   >
                     <div className="font-medium">{formatTimeShort(slot.start_time)} – {formatTimeShort(slot.end_time)}</div>
                     <div className="truncate text-[10px] text-muted-foreground">{slot.offering_name}</div>
-                    <div className="font-semibold">{slot.booked_count}/{slot.capacity}</div>
+                    <div className="font-semibold">{slot.booked_count}/{slot.capacity}{full ? " · Full" : ""}</div>
                   </button>
                 );
               })}

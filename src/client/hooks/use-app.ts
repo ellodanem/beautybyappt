@@ -525,6 +525,23 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await fetchStats();
   }, [fetchCalendar, calendarDate, fetchStats]);
 
+  const fetchOfferingSlotBookings = useCallback(async (slotId: number) => {
+    return api<{
+      slot: {
+        id: number;
+        offering_id: number;
+        offering_name: string;
+        offering_color: string;
+        slot_date: string;
+        start_time: string;
+        end_time: string;
+        capacity: number;
+        booked_count: number;
+      };
+      bookings: import("../types").OfferingSlotBooking[];
+    }>("GET", `/api/offerings/slots/${slotId}/bookings`);
+  }, []);
+
   const fetchClients = useCallback(async (pag: PaginatedState, search: string) => {
     const params = new URLSearchParams({ page: String(pag.page), limit: String(pag.limit) });
     if (search) params.set("search", search);
@@ -692,6 +709,24 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     const res = await api<{ appointment: Appointment }>("GET", `/api/appointments/${id}`);
     setSelectedAppointment(res.appointment);
   }, []);
+
+  const moveOfferingSlotBookings = useCallback(async (targetSlotId: number, appointmentIds: number[]) => {
+    await api("POST", `/api/offerings/slots/${targetSlotId}/move-bookings`, {
+      appointment_ids: appointmentIds,
+    });
+    await Promise.all([
+      fetchCalendar(calendarDate),
+      fetchStats(),
+      fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope),
+    ]);
+    if (selectedAppointment && appointmentIds.includes(selectedAppointment.id)) {
+      await selectAppointment(selectedAppointment.id);
+    }
+  }, [
+    fetchCalendar, calendarDate, fetchStats, fetchAppointments,
+    appointmentsPag, appointmentsSearch, appointmentsStatusFilter, appointmentsScope,
+    selectedAppointment, selectAppointment,
+  ]);
 
   const addAppointmentNote = useCallback(async (aptId: number, content: string) => {
     await api("POST", `/api/appointments/${aptId}/notes`, { content });
@@ -891,6 +926,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     branding, updateBranding, uploadBrandingLogo,
     offerings, calendarOfferingSlots, fetchOfferings,
     createOffering, updateOffering, goLiveOffering, duplicateOffering, archiveOffering, deleteOffering, bookOfferingSlot,
+    fetchOfferingSlotBookings, moveOfferingSlotBookings,
     loading, error, setError,
   };
 }

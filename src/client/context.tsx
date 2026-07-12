@@ -3,7 +3,7 @@ import { useContext } from "preact/hooks";
 import type {
   Appointment, Client, Staff, Service, Product, BlockedSlot, Stats, PaginatedState,
   ClientLookup, StaffLookup, OfferingSummary, OfferingSlotInstance, EventDayInfo, AppointmentConflict,
-  AppointmentServiceLineInput,
+  AppointmentServiceLineInput, OfferingSlotBooking,
 } from "./types";
 import type { CalendarViewMode } from "./lib/calendar-range";
 import type { AppointmentListScope } from "../shared/appointment-scope";
@@ -214,6 +214,21 @@ export interface AppContextValue {
     addon_ids?: number[];
     notes?: string;
   }) => Promise<void>;
+  fetchOfferingSlotBookings: (slotId: number) => Promise<{
+    slot: {
+      id: number;
+      offering_id: number;
+      offering_name: string;
+      offering_color: string;
+      slot_date: string;
+      start_time: string;
+      end_time: string;
+      capacity: number;
+      booked_count: number;
+    };
+    bookings: OfferingSlotBooking[];
+  }>;
+  moveOfferingSlotBookings: (targetSlotId: number, appointmentIds: number[]) => Promise<void>;
 
   updateAppointment: (id: number, data: Partial<Appointment>) => Promise<void>;
   updateAppointmentAddons: (id: number, addonIds: number[]) => Promise<void>;

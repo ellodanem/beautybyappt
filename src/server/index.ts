@@ -203,6 +203,7 @@ const AppointmentSchema = z.object({
   uses_custom_reminders: z.boolean().optional(),
   appointment_reminders: z.array(AppointmentReminderStatusSchema).optional(),
   offering_id: z.number().int().nullable().optional(),
+  offering_slot_instance_id: z.number().int().nullable().optional(),
   offering_base_price: z.number().nullable().optional(),
   offering_addons: z.array(OfferingAddonSchema).optional(),
   appointment_offering_addons: z.array(AppointmentOfferingAddonSchema).optional(),

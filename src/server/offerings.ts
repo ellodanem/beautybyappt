@@ -9,6 +9,7 @@ import { findRegularAppointmentConflicts } from "./event-override.js";
 import { assertClientEmailForBooking, findOrCreateClient } from "./clients.js";
 import { parseRequiredBookingEmail } from "../shared/email.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
+import { scheduleGoogleCalendarAppointmentSync } from "./calendar-sync.js";
 import { runtimeEnv } from "./runtime-env.js";
 import { isStripePaymentsActive } from "./stripe-payments-settings.js";
 import type { StripeEnv } from "./stripe.js";
@@ -590,6 +591,145 @@ async function bookOfferingSlotInstance(
 
 export { bookOfferingSlotInstance };
 
+const MOVEABLE_APPOINTMENT_STATUSES = new Set(["booked", "confirmed", "in_progress"]);
+
+async function listSlotBookings(slotId: number) {
+  const slot = await get<{
+    id: number;
+    offering_id: number;
+    slot_date: string;
+    start_time: string;
+    end_time: string;
+    capacity: number;
+    booked_count: number;
+    offering_name: string;
+    offering_color: string;
+    status: string;
+  }>(
+    `SELECT si.id, si.offering_id, si.slot_date, si.start_time, si.end_time, si.capacity, si.booked_count,
+            o.name as offering_name, o.color as offering_color, o.status
+     FROM offering_slot_instances si
+     JOIN offerings o ON o.id = si.offering_id
+     WHERE si.id = ?`,
+    [slotId],
+  );
+  if (!slot) throw new Error("SLOT_NOT_FOUND");
+
+  const bookings = await query<{
+    id: number;
+    identifier: string;
+    client_id: number;
+    client_name: string;
+    client_phone: string | null;
+    status: string;
+    start_time: string;
+    end_time: string;
+    payment_status: string | null;
+  }>(
+    `SELECT a.id, a.identifier, a.client_id, cl.name as client_name, cl.phone as client_phone,
+            a.status, a.start_time, a.end_time, a.payment_status
+     FROM appointments a
+     LEFT JOIN clients cl ON cl.id = a.client_id
+     WHERE a.offering_slot_instance_id = ?
+       AND a.status IN ('booked', 'confirmed', 'in_progress')
+     ORDER BY cl.name ASC, a.id ASC`,
+    [slotId],
+  );
+
+  return { slot, bookings };
+}
+
+async function moveAppointmentsToSlot(
+  targetSlotId: number,
+  appointmentIds: number[],
+): Promise<{ moved_ids: number[] }> {
+  const uniqueIds = [...new Set(appointmentIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (uniqueIds.length === 0) throw new Error("NO_APPOINTMENTS");
+
+  const target = await get<{
+    id: number;
+    offering_id: number;
+    slot_date: string;
+    start_time: string;
+    capacity: number;
+    booked_count: number;
+    status: string;
+    duration: number;
+  }>(
+    `SELECT si.id, si.offering_id, si.slot_date, si.start_time, si.capacity, si.booked_count,
+            o.status, o.duration
+     FROM offering_slot_instances si
+     JOIN offerings o ON o.id = si.offering_id
+     WHERE si.id = ?`,
+    [targetSlotId],
+  );
+  if (!target) throw new Error("SLOT_NOT_FOUND");
+  if (target.status !== "live") throw new Error("OFFERING_NOT_LIVE");
+
+  const placeholders = uniqueIds.map(() => "?").join(",");
+  const appointments = await query<{
+    id: number;
+    status: string;
+    offering_slot_instance_id: number | null;
+    offering_id: number | null;
+  }>(
+    `SELECT a.id, a.status, a.offering_slot_instance_id, si.offering_id
+     FROM appointments a
+     LEFT JOIN offering_slot_instances si ON si.id = a.offering_slot_instance_id
+     WHERE a.id IN (${placeholders})`,
+    uniqueIds,
+  );
+  if (appointments.length !== uniqueIds.length) throw new Error("APPOINTMENT_NOT_FOUND");
+
+  for (const apt of appointments) {
+    if (!apt.offering_slot_instance_id || apt.offering_id == null) {
+      throw new Error("NOT_EVENT_BOOKING");
+    }
+    if (apt.offering_id !== target.offering_id) throw new Error("DIFFERENT_OFFERING");
+    if (!MOVEABLE_APPOINTMENT_STATUSES.has(apt.status)) throw new Error("INACTIVE_APPOINTMENT");
+  }
+
+  const toMove = appointments.filter((apt) => apt.offering_slot_instance_id !== targetSlotId);
+  if (toMove.length === 0) throw new Error("ALREADY_IN_SLOT");
+
+  const spotsLeft = target.capacity - target.booked_count;
+  if (toMove.length > spotsLeft) throw new Error("SLOT_FULL");
+
+  const movedIds: number[] = [];
+  for (const apt of toMove) {
+    const oldSlotId = apt.offering_slot_instance_id!;
+    const extras = await get<{ extra: number }>(
+      `SELECT COALESCE(SUM(oa.extra_duration), 0) as extra
+       FROM appointment_offering_addons aoa
+       JOIN offering_addons oa ON oa.id = aoa.offering_addon_id
+       WHERE aoa.appointment_id = ?`,
+      [apt.id],
+    );
+    const endTime = addMinutes(target.start_time, target.duration + (extras?.extra ?? 0));
+
+    await run(
+      `UPDATE appointments
+       SET offering_slot_instance_id = ?, scheduled_date = ?, start_time = ?, end_time = ?,
+           updated_at = datetime('now')
+       WHERE id = ?`,
+      [targetSlotId, target.slot_date, target.start_time, endTime, apt.id],
+    );
+    await run(
+      "UPDATE offering_slot_instances SET booked_count = booked_count - 1 WHERE id = ? AND booked_count > 0",
+      [oldSlotId],
+    );
+    await run(
+      "UPDATE offering_slot_instances SET booked_count = booked_count + 1 WHERE id = ?",
+      [targetSlotId],
+    );
+    movedIds.push(apt.id);
+  }
+
+  return { moved_ids: movedIds };
+}
+
+export { moveAppointmentsToSlot };
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerOfferingRoutes(app: OpenAPIHono<any>) {
   const listOfferings = createRoute({
@@ -1158,6 +1298,138 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
       if (msg === "CLIENT_NOT_FOUND") return c.json({ error: "Client not found" }, 400);
       if (msg === "Email is required" || msg === "Enter a valid email address") {
         return c.json({ error: msg }, 400);
+      }
+      throw err;
+    }
+  });
+
+  const listSlotBookingsRoute = createRoute({
+    method: "get",
+    path: "/api/offerings/slots/{id}/bookings",
+    request: { params: IdParam },
+    responses: {
+      200: {
+        description: "Bookings in this event slot",
+        content: {
+          "application/json": {
+            schema: z.object({
+              slot: z.object({
+                id: z.number().int(),
+                offering_id: z.number().int(),
+                offering_name: z.string(),
+                offering_color: z.string(),
+                slot_date: z.string(),
+                start_time: z.string(),
+                end_time: z.string(),
+                capacity: z.number().int(),
+                booked_count: z.number().int(),
+              }),
+              bookings: z.array(z.object({
+                id: z.number().int(),
+                identifier: z.string(),
+                client_id: z.number().int(),
+                client_name: z.string(),
+                client_phone: z.string().nullable().optional(),
+                status: z.string(),
+                start_time: z.string(),
+                end_time: z.string(),
+                payment_status: z.string().nullable().optional(),
+              })),
+            }),
+          },
+        },
+      },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(listSlotBookingsRoute, async (c) => {
+    const slotId = parseInt(c.req.valid("param").id, 10);
+    try {
+      const result = await listSlotBookings(slotId);
+      return c.json({
+        slot: {
+          id: result.slot.id,
+          offering_id: result.slot.offering_id,
+          offering_name: result.slot.offering_name,
+          offering_color: result.slot.offering_color,
+          slot_date: result.slot.slot_date,
+          start_time: result.slot.start_time,
+          end_time: result.slot.end_time,
+          capacity: result.slot.capacity,
+          booked_count: result.slot.booked_count,
+        },
+        bookings: result.bookings,
+      }, 200);
+    } catch (err) {
+      if ((err as Error).message === "SLOT_NOT_FOUND") {
+        return c.json({ error: "Slot not found" }, 404);
+      }
+      throw err;
+    }
+  });
+
+  const moveSlotBookings = createRoute({
+    method: "post",
+    path: "/api/offerings/slots/{id}/move-bookings",
+    request: {
+      params: IdParam,
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              appointment_ids: z.array(z.number().int()).min(1),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Bookings moved",
+        content: {
+          "application/json": {
+            schema: z.object({
+              moved_ids: z.array(z.number().int()),
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(moveSlotBookings, async (c) => {
+    const targetSlotId = parseInt(c.req.valid("param").id, 10);
+    const { appointment_ids } = c.req.valid("json");
+
+    try {
+      const result = await moveAppointmentsToSlot(targetSlotId, appointment_ids);
+      for (const id of result.moved_ids) {
+        scheduleGoogleCalendarAppointmentSync(c, id);
+      }
+      return c.json(result, 200);
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg === "SLOT_NOT_FOUND") return c.json({ error: "Target time slot not found" }, 404);
+      if (msg === "OFFERING_NOT_LIVE") return c.json({ error: "This event is not live" }, 400);
+      if (msg === "NO_APPOINTMENTS") return c.json({ error: "Select at least one client" }, 400);
+      if (msg === "APPOINTMENT_NOT_FOUND") return c.json({ error: "One or more appointments were not found" }, 404);
+      if (msg === "NOT_EVENT_BOOKING") {
+        return c.json({ error: "Only event bookings can be moved between times" }, 400);
+      }
+      if (msg === "DIFFERENT_OFFERING") {
+        return c.json({ error: "Clients can only be moved within the same event" }, 400);
+      }
+      if (msg === "INACTIVE_APPOINTMENT") {
+        return c.json({ error: "Cancelled or completed bookings can't be moved" }, 400);
+      }
+      if (msg === "ALREADY_IN_SLOT") {
+        return c.json({ error: "Those clients are already at this time" }, 400);
+      }
+      if (msg === "SLOT_FULL") {
+        return c.json({ error: "Not enough open spots at that time" }, 400);
       }
       throw err;
     }

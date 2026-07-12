@@ -11,6 +11,7 @@ import { MobileNavTrigger } from "./mobile-nav-trigger";
 import { PaymentBadge } from "./payment-badge";
 import { CloseOutBanner } from "./close-out-banner";
 import { AppointmentRemindersCard } from "./appointment-reminders-card";
+import { ManageEventSlot } from "./manage-event-slot";
 import { formatDateShort, formatTimeShort } from "@/lib/utils";
 import { formatMoney } from "../../shared/currency";
 import { appointmentBalance, computeDefaultDeposit } from "../../shared/payment";
@@ -80,6 +81,7 @@ export function AppointmentDetail() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateEmailSending, setTemplateEmailSending] = useState(false);
   const [templateEmailSent, setTemplateEmailSent] = useState(false);
+  const [showChangeTime, setShowChangeTime] = useState(false);
 
   useEffect(() => {
     if (!apt) return;
@@ -297,6 +299,23 @@ export function AppointmentDetail() {
 
   return (
     <div className="space-y-6 p-4 pb-8 md:p-6">
+      {showChangeTime && apt.offering_slot_instance_id && apt.offering_id && (
+        <ManageEventSlot
+          slot={{
+            id: apt.offering_slot_instance_id,
+            offering_id: apt.offering_id,
+            offering_name: apt.offering_name || "Event",
+            offering_color: apt.offering_color || "#7c3aed",
+            slot_date: apt.scheduled_date,
+            start_time: apt.start_time,
+            end_time: apt.end_time,
+            capacity: 0,
+            booked_count: 0,
+          }}
+          preselectAppointmentIds={[apt.id]}
+          onClose={() => setShowChangeTime(false)}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <MobileNavTrigger />
         <Button variant="ghost" size="sm" className="shrink-0" onClick={() => navigate("/appointments")}>
@@ -325,6 +344,11 @@ export function AppointmentDetail() {
                 <div className="space-y-1">
                   <Label className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock className="h-3 w-3" /> Date & Time</Label>
                   <p className="text-sm font-medium">{formatDateShort(apt.scheduled_date)} at {formatTimeShort(apt.start_time)} - {formatTimeShort(apt.end_time)}</p>
+                  {apt.offering_slot_instance_id && apt.offering_id && ["booked", "confirmed", "in_progress"].includes(apt.status) && (
+                    <Button variant="outline" size="sm" className="mt-2 h-8" onClick={() => setShowChangeTime(true)}>
+                      Change time
+                    </Button>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label className="flex items-center gap-1.5 text-xs text-muted-foreground"><User className="h-3 w-3" /> Client</Label>

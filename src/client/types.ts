@@ -43,6 +43,7 @@ export interface Appointment {
   uses_custom_reminders?: boolean;
   appointment_reminders?: AppointmentReminderStatusItem[];
   offering_id?: number | null;
+  offering_slot_instance_id?: number | null;
   offering_base_price?: number | null;
   offering_addons?: OfferingAddon[];
   appointment_offering_addons?: AppointmentOfferingAddon[];
@@ -281,6 +282,18 @@ export interface AppointmentConflict {
   scheduled_date: string;
   start_time: string;
   client_name: string;
+}
+
+export interface OfferingSlotBooking {
+  id: number;
+  identifier: string;
+  client_id: number;
+  client_name: string;
+  client_phone?: string | null;
+  status: string;
+  start_time: string;
+  end_time: string;
+  payment_status?: string | null;
 }
 
 export interface OfferingSlotInstance {
