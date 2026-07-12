@@ -68,7 +68,7 @@ export function ManageEventSlot({
       try {
         const slotsData = await api<{ slots: OfferingSlotInstance[] }>(
           "GET",
-          `/api/offerings/slots?start=${slot.slot_date}&end=${slot.slot_date}`,
+          `/api/offerings/calendar?start=${slot.slot_date}&end=${slot.slot_date}`,
         );
         daySlots = slotsData.slots;
       } catch (err) {
