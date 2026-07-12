@@ -302,8 +302,8 @@ export function AppointmentDetail() {
       {showChangeTime && apt.offering_slot_instance_id && apt.offering_id && (
         <ManageEventSlot
           slot={{
-            id: apt.offering_slot_instance_id,
-            offering_id: apt.offering_id,
+            id: Number(apt.offering_slot_instance_id),
+            offering_id: Number(apt.offering_id),
             offering_name: apt.offering_name || "Event",
             offering_color: apt.offering_color || "#7c3aed",
             slot_date: apt.scheduled_date,
@@ -311,6 +311,17 @@ export function AppointmentDetail() {
             end_time: apt.end_time,
             capacity: 0,
             booked_count: 0,
+          }}
+          seedBooking={{
+            id: apt.id,
+            identifier: apt.identifier,
+            client_id: apt.client_id,
+            client_name: apt.client_name || "Client",
+            client_phone: apt.client_phone ?? null,
+            status: apt.status,
+            start_time: apt.start_time,
+            end_time: apt.end_time,
+            payment_status: apt.payment_status ?? null,
           }}
           preselectAppointmentIds={[apt.id]}
           onClose={() => setShowChangeTime(false)}

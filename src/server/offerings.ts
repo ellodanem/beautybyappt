@@ -619,7 +619,7 @@ async function listSlotBookings(slotId: number) {
     id: number;
     identifier: string;
     client_id: number;
-    client_name: string;
+    client_name: string | null;
     client_phone: string | null;
     status: string;
     start_time: string;
@@ -636,7 +636,23 @@ async function listSlotBookings(slotId: number) {
     [slotId],
   );
 
-  return { slot, bookings };
+  return {
+    slot: {
+      ...slot,
+      id: Number(slot.id),
+      offering_id: Number(slot.offering_id),
+      capacity: Number(slot.capacity),
+      booked_count: Number(slot.booked_count),
+    },
+    bookings: bookings.map((b) => ({
+      ...b,
+      id: Number(b.id),
+      client_id: Number(b.client_id),
+      client_name: b.client_name?.trim() || "Client",
+      client_phone: b.client_phone ?? null,
+      payment_status: b.payment_status ?? null,
+    })),
+  };
 }
 
 async function moveAppointmentsToSlot(
@@ -682,22 +698,30 @@ async function moveAppointmentsToSlot(
   if (appointments.length !== uniqueIds.length) throw new Error("APPOINTMENT_NOT_FOUND");
 
   for (const apt of appointments) {
-    if (!apt.offering_slot_instance_id || apt.offering_id == null) {
+    const slotInstanceId = apt.offering_slot_instance_id == null
+      ? null
+      : Number(apt.offering_slot_instance_id);
+    const offeringId = apt.offering_id == null ? null : Number(apt.offering_id);
+    if (!slotInstanceId || offeringId == null) {
       throw new Error("NOT_EVENT_BOOKING");
     }
-    if (apt.offering_id !== target.offering_id) throw new Error("DIFFERENT_OFFERING");
+    if (offeringId !== Number(target.offering_id)) throw new Error("DIFFERENT_OFFERING");
     if (!MOVEABLE_APPOINTMENT_STATUSES.has(apt.status)) throw new Error("INACTIVE_APPOINTMENT");
+    apt.offering_slot_instance_id = slotInstanceId;
+    apt.offering_id = offeringId;
   }
 
-  const toMove = appointments.filter((apt) => apt.offering_slot_instance_id !== targetSlotId);
+  const toMove = appointments.filter(
+    (apt) => Number(apt.offering_slot_instance_id) !== Number(targetSlotId),
+  );
   if (toMove.length === 0) throw new Error("ALREADY_IN_SLOT");
 
-  const spotsLeft = target.capacity - target.booked_count;
+  const spotsLeft = Number(target.capacity) - Number(target.booked_count);
   if (toMove.length > spotsLeft) throw new Error("SLOT_FULL");
 
   const movedIds: number[] = [];
   for (const apt of toMove) {
-    const oldSlotId = apt.offering_slot_instance_id!;
+    const oldSlotId = Number(apt.offering_slot_instance_id);
     const extras = await get<{ extra: number }>(
       `SELECT COALESCE(SUM(oa.extra_duration), 0) as extra
        FROM appointment_offering_addons aoa
@@ -1344,7 +1368,10 @@ export function registerOfferingRoutes(app: OpenAPIHono<any>) {
   });
 
   app.openapi(listSlotBookingsRoute, async (c) => {
-    const slotId = parseInt(c.req.valid("param").id, 10);
+    const slotId = Number.parseInt(c.req.valid("param").id, 10);
+    if (!Number.isFinite(slotId) || slotId <= 0) {
+      return c.json({ error: "Slot not found" }, 404);
+    }
     try {
       const result = await listSlotBookings(slotId);
       return c.json({

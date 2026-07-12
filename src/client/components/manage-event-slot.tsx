@@ -11,65 +11,146 @@ type SlotSummary = Pick<
   "id" | "offering_id" | "offering_name" | "offering_color" | "slot_date" | "start_time" | "end_time" | "capacity" | "booked_count"
 >;
 
+function normalizeTime(value: string): string {
+  return value.slice(0, 5);
+}
+
+function sameId(a: number | string | null | undefined, b: number | string | null | undefined): boolean {
+  if (a == null || b == null) return false;
+  return Number(a) === Number(b);
+}
+
 interface Props {
   slot: SlotSummary;
   onClose: () => void;
   onBookClient?: () => void;
+  /** Current appointment when opened from booking detail — always shown even if roster fetch lags. */
+  seedBooking?: OfferingSlotBooking;
   preselectAppointmentIds?: number[];
 }
 
-export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointmentIds }: Props) {
+export function ManageEventSlot({
+  slot,
+  onClose,
+  onBookClient,
+  seedBooking,
+  preselectAppointmentIds,
+}: Props) {
   const {
     fetchOfferingSlotBookings, moveOfferingSlotBookings, setError, navigate,
   } = useApp();
 
-  const [bookings, setBookings] = useState<OfferingSlotBooking[]>([]);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const preselectKey = (preselectAppointmentIds ?? []).join(",");
+
+  const [bookings, setBookings] = useState<OfferingSlotBooking[]>(seedBooking ? [seedBooking] : []);
+  const [selectedIds, setSelectedIds] = useState<number[]>(
+    preselectAppointmentIds?.length ? [...preselectAppointmentIds] : seedBooking ? [seedBooking.id] : [],
+  );
   const [destinationSlots, setDestinationSlots] = useState<SlotSummary[]>([]);
-  const [slotMeta, setSlotMeta] = useState({ capacity: slot.capacity, booked_count: slot.booked_count });
+  const [slotMeta, setSlotMeta] = useState({
+    capacity: slot.capacity,
+    booked_count: slot.booked_count,
+    start_time: slot.start_time,
+    end_time: slot.end_time,
+  });
   const [targetSlotId, setTargetSlotId] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(null);
+
+      let daySlots: OfferingSlotInstance[] = [];
       try {
-        const [bookingData, slotsData] = await Promise.all([
-          fetchOfferingSlotBookings(slot.id),
-          api<{ slots: OfferingSlotInstance[] }>(
-            "GET",
-            `/api/offerings/slots?start=${slot.slot_date}&end=${slot.slot_date}`,
-          ),
-        ]);
+        const slotsData = await api<{ slots: OfferingSlotInstance[] }>(
+          "GET",
+          `/api/offerings/slots?start=${slot.slot_date}&end=${slot.slot_date}`,
+        );
+        daySlots = slotsData.slots;
+      } catch (err) {
+        if (!cancelled) {
+          const message = (err as Error).message;
+          setLoadError(message);
+          setError(message);
+        }
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+
+      const matched = daySlots.find((s) => (
+        sameId(s.offering_id, slot.offering_id)
+        && s.slot_date === slot.slot_date
+        && normalizeTime(s.start_time) === normalizeTime(slot.start_time)
+      )) ?? daySlots.find((s) => sameId(s.id, slot.id));
+
+      const activeSlotId = matched ? Number(matched.id) : Number(slot.id);
+
+      if (matched) {
+        setSlotMeta({
+          capacity: matched.capacity,
+          booked_count: matched.booked_count,
+          start_time: matched.start_time,
+          end_time: matched.end_time,
+        });
+      }
+
+      setDestinationSlots(
+        daySlots
+          .filter((s) => sameId(s.offering_id, slot.offering_id) && !sameId(s.id, activeSlotId))
+          .sort((a, b) => a.start_time.localeCompare(b.start_time)),
+      );
+
+      try {
+        const bookingData = await fetchOfferingSlotBookings(activeSlotId);
         if (cancelled) return;
-        setBookings(bookingData.bookings);
+        const roster = [...bookingData.bookings];
+        if (seedBooking && !roster.some((b) => sameId(b.id, seedBooking.id))) {
+          roster.unshift(seedBooking);
+        }
+        setBookings(roster);
         setSlotMeta({
           capacity: bookingData.slot.capacity,
           booked_count: bookingData.slot.booked_count,
+          start_time: bookingData.slot.start_time,
+          end_time: bookingData.slot.end_time,
         });
-        const preselect = preselectAppointmentIds?.filter((id) =>
-          bookingData.bookings.some((b) => b.id === id),
-        );
+        const preselect = (preselectAppointmentIds ?? [])
+          .map(Number)
+          .filter((id) => roster.some((b) => sameId(b.id, id)));
         setSelectedIds(
-          preselect && preselect.length > 0
+          preselect.length > 0
             ? preselect
-            : bookingData.bookings.map((b) => b.id),
-        );
-        setDestinationSlots(
-          slotsData.slots
-            .filter((s) => s.offering_id === slot.offering_id && s.id !== slot.id)
-            .sort((a, b) => a.start_time.localeCompare(b.start_time)),
+            : roster.map((b) => Number(b.id)),
         );
       } catch (err) {
-        if (!cancelled) setError((err as Error).message);
+        if (cancelled) return;
+        const message = (err as Error).message;
+        setLoadError(message);
+        setError(message);
+        if (seedBooking) {
+          setBookings([seedBooking]);
+          setSelectedIds([seedBooking.id]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [slot.id, slot.slot_date, slot.offering_id, fetchOfferingSlotBookings, preselectAppointmentIds, setError]);
+  }, [
+    slot.id,
+    slot.slot_date,
+    slot.offering_id,
+    slot.start_time,
+    fetchOfferingSlotBookings,
+    preselectKey,
+    seedBooking?.id,
+    setError,
+  ]);
 
   const selectedTarget = useMemo(
     () => destinationSlots.find((s) => String(s.id) === targetSlotId) ?? null,
@@ -94,12 +175,15 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
   const handleMove = async () => {
     if (!selectedTarget || selectedIds.length === 0) return;
     setMoving(true);
+    setLoadError(null);
     setError(null);
     try {
-      await moveOfferingSlotBookings(selectedTarget.id, selectedIds);
+      await moveOfferingSlotBookings(Number(selectedTarget.id), selectedIds.map(Number));
       onClose();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      setLoadError(message);
+      setError(message);
     } finally {
       setMoving(false);
     }
@@ -109,14 +193,28 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
     <Dialog open onOpenChange={(open: boolean) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Event time · {formatTimeShort(slot.start_time)}</DialogTitle>
+          <DialogTitle>Event time · {formatTimeShort(slotMeta.start_time || slot.start_time)}</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="space-y-1 pb-3 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">{slot.offering_name}</p>
-            <p>{slot.slot_date} · {formatTimeShort(slot.start_time)} – {formatTimeShort(slot.end_time)}</p>
-            <p>{bookings.length}{slotMeta.capacity > 0 ? `/${slotMeta.capacity}` : ""} booked</p>
+            <p>
+              {slot.slot_date} · {formatTimeShort(slotMeta.start_time || slot.start_time)}
+              {" – "}
+              {formatTimeShort(slotMeta.end_time || slot.end_time)}
+            </p>
+            <p>
+              {bookings.length}
+              {slotMeta.capacity > 0 ? `/${slotMeta.capacity}` : ""}
+              {" booked"}
+            </p>
           </div>
+
+          {loadError && (
+            <p className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              {loadError}
+            </p>
+          )}
 
           {loading ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Loading clients…</p>
@@ -130,7 +228,7 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
                   type="button"
                   className="text-xs text-primary hover:underline"
                   onClick={() => setSelectedIds(
-                    selectedIds.length === bookings.length ? [] : bookings.map((b) => b.id),
+                    selectedIds.length === bookings.length ? [] : bookings.map((b) => Number(b.id)),
                   )}
                 >
                   {selectedIds.length === bookings.length ? "Clear" : "Select all"}
@@ -138,17 +236,18 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
               </div>
               <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
                 {bookings.map((booking) => {
-                  const checked = selectedIds.includes(booking.id);
+                  const bookingId = Number(booking.id);
+                  const checked = selectedIds.some((id) => sameId(id, bookingId));
                   return (
                     <label
-                      key={booking.id}
+                      key={bookingId}
                       className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60"
                     >
                       <input
                         type="checkbox"
                         className="mt-1"
                         checked={checked}
-                        onChange={() => toggleId(booking.id)}
+                        onChange={() => toggleId(bookingId)}
                       />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{booking.client_name}</span>
@@ -163,7 +262,7 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
                         onClick={(e) => {
                           e.preventDefault();
                           onClose();
-                          navigate(`/appointments/${booking.id}`);
+                          navigate(`/appointments/${bookingId}`);
                         }}
                       >
                         Open
@@ -210,6 +309,11 @@ export function ManageEventSlot({ slot, onClose, onBookClient, preselectAppointm
                 )}
               </div>
             </div>
+          )}
+          {!loading && bookings.length > 0 && destinationSlots.length === 0 && (
+            <p className="pt-2 text-xs text-muted-foreground">
+              No other open times on this day for this event.
+            </p>
           )}
         </DialogBody>
         <DialogFooter className="flex-col gap-2 sm:flex-row">
