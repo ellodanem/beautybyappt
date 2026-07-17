@@ -48,11 +48,20 @@ export interface AppContextValue {
     notes?: string;
     service_ids?: number[];
   }) => Promise<string>;
+  createPaymentLink: (data: {
+    quoted_total: number;
+    collect?: "full" | "deposit";
+    staff_id?: number | null;
+    currency?: string;
+    notes?: string;
+  }) => Promise<string>;
 
   stripeConfigured: boolean;
   stripeWebhookConfigured: boolean;
   stripePaymentsEnabled: boolean;
+  stripeFeePassthroughEnabled: boolean;
   updateStripePaymentsEnabled: (enabled: boolean) => Promise<void>;
+  updateStripeFeePassthroughEnabled: (enabled: boolean) => Promise<void>;
 
   notificationSettings: {
     email_enabled: boolean;

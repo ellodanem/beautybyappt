@@ -154,6 +154,9 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_username', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_password_enc', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('smtp_from_address', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('subscription_plan', 'free');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_passthrough_enabled', '0');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_percent', '0.039');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_fixed', '0.30');
 
 -- Custom booking links (A1)
 CREATE TABLE IF NOT EXISTS booking_links (
@@ -174,8 +177,46 @@ CREATE TABLE IF NOT EXISTS booking_links (
   client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
   stripe_checkout_session_id TEXT,
   travel_fee REAL NOT NULL DEFAULT 0,
+  fee_passthrough INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')),
   confirmed_at TEXT
+);
+
+-- Price-only payment links (pay first, schedule later)
+CREATE TABLE IF NOT EXISTS payment_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT NOT NULL UNIQUE,
+  staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+  quoted_total REAL NOT NULL DEFAULT 0,
+  deposit_amount REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  notes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  expires_at TEXT,
+  client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+  pending_payment_id INTEGER,
+  stripe_checkout_session_id TEXT,
+  fee_passthrough INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  paid_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pending_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  payment_link_id INTEGER REFERENCES payment_links(id) ON DELETE SET NULL,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+  quoted_total REAL NOT NULL DEFAULT 0,
+  amount_paid REAL NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  notes TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',
+  client_was_existing INTEGER NOT NULL DEFAULT 0,
+  appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+  stripe_checkout_session_id TEXT,
+  stripe_payment_intent_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  applied_at TEXT
 );
 
 -- Demo data: seed once on fresh installs only (never re-seed after deletions).
@@ -276,6 +317,7 @@ CREATE TABLE IF NOT EXISTS payments (
   currency TEXT NOT NULL DEFAULT 'USD',
   type TEXT NOT NULL,
   status TEXT NOT NULL,
+  fee_passthrough INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -283,6 +325,10 @@ CREATE INDEX IF NOT EXISTS idx_payments_appointment ON payments(appointment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_booking_link ON payments(booking_link_id);
 CREATE INDEX IF NOT EXISTS idx_payments_stripe_session ON payments(stripe_checkout_session_id);
 CREATE INDEX IF NOT EXISTS idx_payments_link_token ON payments(link_token);
+CREATE INDEX IF NOT EXISTS idx_payment_links_token ON payment_links(token);
+CREATE INDEX IF NOT EXISTS idx_payment_links_status ON payment_links(status);
+CREATE INDEX IF NOT EXISTS idx_pending_payments_status ON pending_payments(status);
+CREATE INDEX IF NOT EXISTS idx_pending_payments_client ON pending_payments(client_id);
 
 CREATE TABLE IF NOT EXISTS notification_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -429,6 +475,7 @@ CREATE TABLE IF NOT EXISTS offering_booking_checkouts (
   status TEXT NOT NULL DEFAULT 'pending',
   expires_at TEXT NOT NULL,
   appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+  fee_passthrough INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -455,6 +502,7 @@ CREATE TABLE IF NOT EXISTS anytime_booking_checkouts (
   status TEXT NOT NULL DEFAULT 'pending',
   expires_at TEXT NOT NULL,
   appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+  fee_passthrough INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

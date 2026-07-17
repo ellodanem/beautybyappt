@@ -34,6 +34,8 @@ import { AnytimeOfferForm } from "./components/anytime-offer-form";
 
 import { EventOfferWizard } from "./components/offering-wizard";
 
+import { PendingPaymentsPage } from "./components/pending-payments";
+
 import { ErrorBanner } from "./components/error-banner";
 
 import { businessDisplayName } from "../shared/branding";
@@ -117,6 +119,8 @@ export function App() {
       case "calendar": return <CalendarView />;
 
       case "appointments": return <AppointmentList />;
+
+      case "pending-payments": return <PendingPaymentsPage />;
 
       case "clients": return <ClientList />;
 

@@ -8,6 +8,8 @@ import {
   type StripeEnv,
 } from "./stripe.js";
 import { isStripePaymentsActive } from "./stripe-payments-settings.js";
+import { snapshotFeePassthrough } from "./stripe-fee-settings.js";
+import { feeCheckoutMetadata, maybeGrossUpLineItems, resolveNetPaidAmount } from "./stripe-checkout-fees.js";
 import {
   derivePaymentStatus,
   offeringCheckoutAmount,
@@ -36,6 +38,7 @@ export type OfferingCheckoutRow = {
   status: string;
   expires_at: string;
   appointment_id: number | null;
+  fee_passthrough: number;
 };
 
 function checkoutExpiresAt(): string {
@@ -172,12 +175,13 @@ export async function createOfferingBookingCheckout(
 
   const depositAmount = resolveOfferingDeposit(opts.totalPrice);
   const expiresAt = checkoutExpiresAt();
+  const feePassthrough = await snapshotFeePassthrough();
 
   const insert = await run(
     `INSERT INTO offering_booking_checkouts (
       offering_id, slot_instance_id, client_id, addon_ids, notes,
-      total_price, deposit_amount, currency, payment_choice, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      total_price, deposit_amount, currency, payment_choice, expires_at, fee_passthrough
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       opts.offeringId,
       opts.slotInstanceId,
@@ -189,6 +193,7 @@ export async function createOfferingBookingCheckout(
       opts.currency,
       opts.paymentChoice,
       expiresAt,
+      feePassthrough ? 1 : 0,
     ],
   );
 
@@ -204,10 +209,12 @@ export async function createOfferingBookingCheckout(
   );
   if (lineItems.length === 0) throw new Error("No payment required");
 
+  const adjusted = await maybeGrossUpLineItems(lineItems, Boolean(checkout.fee_passthrough));
+
   const base = appBaseUrl(env, opts.requestUrl);
   const session = await createCheckoutSession(env, {
     currency: opts.currency,
-    lineItems,
+    lineItems: adjusted.lineItems,
     successUrl: `${base}/offer/${encodeURIComponent(opts.offeringSlug)}/success?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}/offer/${encodeURIComponent(opts.offeringSlug)}?cancelled=1`,
     customerEmail: opts.clientEmail,
@@ -216,6 +223,7 @@ export async function createOfferingBookingCheckout(
       payment_choice: opts.paymentChoice,
       offering_checkout_id: String(checkoutId),
       offering_slug: opts.offeringSlug,
+      ...feeCheckoutMetadata(adjusted),
     },
   });
 
@@ -281,9 +289,7 @@ export async function finalizeOfferingBookingCheckout(
     checkout.deposit_amount,
     paymentChoice,
   );
-  const amountPaid = session.amount_total != null
-    ? session.amount_total / 100
-    : expectedTotal;
+  const amountPaid = resolveNetPaidAmount(session.metadata, session.amount_total, expectedTotal);
   const piId = paymentIntentId(session);
   const paymentStatus = derivePaymentStatus(
     checkout.total_price,
@@ -316,9 +322,9 @@ export async function finalizeOfferingBookingCheckout(
   );
 
   await run(
-    `INSERT INTO payments (appointment_id, stripe_checkout_session_id, stripe_payment_intent_id, amount, currency, type, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'succeeded')`,
-    [aptId, session.id, piId, amountPaid, checkout.currency, paymentType],
+    `INSERT INTO payments (appointment_id, stripe_checkout_session_id, stripe_payment_intent_id, amount, currency, type, status, fee_passthrough)
+     VALUES (?, ?, ?, ?, ?, ?, 'succeeded', ?)`,
+    [aptId, session.id, piId, amountPaid, checkout.currency, paymentType, checkout.fee_passthrough ? 1 : 0],
   );
 
   return {

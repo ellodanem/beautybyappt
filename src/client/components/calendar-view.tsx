@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CreateAppointment } from "./create-appointment";
-import { CreateBookingLink } from "./create-booking-link";
+import { CreatePaymentLink } from "./create-payment-link";
 import { BookOfferingSlot } from "./book-offering-slot";
 import { ManageEventSlot } from "./manage-event-slot";
 import { MobileNavTrigger } from "./mobile-nav-trigger";
@@ -887,7 +887,7 @@ export function CalendarView() {
             <Ban className="mr-1 h-3.5 w-3.5" /> Block Time
           </Button>
           <Button variant="outline" size="sm" disabled={regularBlocked} onClick={() => setShowBookingLink(true)}>
-            <Link2 className="mr-1 h-3.5 w-3.5" /> Booking link
+            <Link2 className="mr-1 h-3.5 w-3.5" /> Payment link
           </Button>
           <Button size="sm" onClick={() => setShowCreate(true)}>
             <Plus className="mr-1 h-3.5 w-3.5" /> New Booking
@@ -944,7 +944,7 @@ export function CalendarView() {
       )}
 
       {showCreate && <CreateAppointment onClose={() => setShowCreate(false)} defaultDate={calendarDate} />}
-      {showBookingLink && <CreateBookingLink onClose={() => setShowBookingLink(false)} defaultDate={calendarDate} />}
+      {showBookingLink && <CreatePaymentLink onClose={() => setShowBookingLink(false)} />}
       {manageSlot && (
         <ManageEventSlot
           slot={manageSlot}

@@ -71,6 +71,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [stripeConfigured, setStripeConfigured] = useState(false);
   const [stripeWebhookConfigured, setStripeWebhookConfigured] = useState(false);
   const [stripePaymentsEnabled, setStripePaymentsEnabled] = useState(false);
+  const [stripeFeePassthroughEnabled, setStripeFeePassthroughEnabled] = useState(false);
   const [notificationSettings, setNotificationSettings] = useState({
     email_enabled: true,
     sms_enabled: false,
@@ -298,10 +299,12 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       configured: boolean;
       webhook_configured: boolean;
       payments_enabled: boolean;
+      fee_passthrough_enabled: boolean;
     }>("GET", "/api/settings/stripe");
     setStripeConfigured(data.configured);
     setStripeWebhookConfigured(data.webhook_configured);
     setStripePaymentsEnabled(data.payments_enabled);
+    setStripeFeePassthroughEnabled(data.fee_passthrough_enabled);
   }, []);
 
   const updateStripePaymentsEnabled = useCallback(async (enabled: boolean) => {
@@ -309,10 +312,25 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       configured: boolean;
       webhook_configured: boolean;
       payments_enabled: boolean;
+      fee_passthrough_enabled: boolean;
     }>("PUT", "/api/settings/stripe", { payments_enabled: enabled });
     setStripeConfigured(res.configured);
     setStripeWebhookConfigured(res.webhook_configured);
     setStripePaymentsEnabled(res.payments_enabled);
+    setStripeFeePassthroughEnabled(res.fee_passthrough_enabled);
+  }, []);
+
+  const updateStripeFeePassthroughEnabled = useCallback(async (enabled: boolean) => {
+    const res = await api<{
+      configured: boolean;
+      webhook_configured: boolean;
+      payments_enabled: boolean;
+      fee_passthrough_enabled: boolean;
+    }>("PUT", "/api/settings/stripe", { fee_passthrough_enabled: enabled });
+    setStripeConfigured(res.configured);
+    setStripeWebhookConfigured(res.webhook_configured);
+    setStripePaymentsEnabled(res.payments_enabled);
+    setStripeFeePassthroughEnabled(res.fee_passthrough_enabled);
   }, []);
 
   const fetchNotificationSettings = useCallback(async () => {
@@ -666,6 +684,17 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     return `${window.location.origin}${res.url_path}`;
   }, [calendarDate, fetchStats, fetchCalendar]);
 
+  const createPaymentLink = useCallback(async (data: {
+    quoted_total: number;
+    collect?: "full" | "deposit";
+    staff_id?: number | null;
+    currency?: string;
+    notes?: string;
+  }): Promise<string> => {
+    const res = await api<{ payment_link: { token: string }; url_path: string }>("POST", "/api/payment-links", data);
+    return `${window.location.origin}${res.url_path}`;
+  }, []);
+
   const updateDefaultCurrency = useCallback(async (code: string) => {
     const res = await api<{ default_currency: string }>("PUT", "/api/settings/currency", { default_currency: code });
     setDefaultCurrency(res.default_currency);
@@ -898,7 +927,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
     appointmentsScope, setAppointmentsScope,
-    addAppointment, createBookingLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
+    addAppointment, createBookingLink, createPaymentLink, updateAppointment, updateAppointmentAddons, deleteAppointment,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote, sendAppointmentPaymentLink,
     sendAppointmentTemplateEmail,
     calendarAppointments, calendarBlocked, calendarEventDay, calendarDate, setCalendarDate,
@@ -915,7 +944,8 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     defaultCurrency, currencyOptions, updateDefaultCurrency,
     businessLocale, localeCountryOptions, localeTimezoneOptions, updateBusinessLocale,
     blockRegularOnEventDays, updateBlockRegularOnEventDays,
-    stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, updateStripePaymentsEnabled,
+    stripeConfigured, stripeWebhookConfigured, stripePaymentsEnabled, stripeFeePassthroughEnabled,
+    updateStripePaymentsEnabled, updateStripeFeePassthroughEnabled,
     notificationSettings, updateNotificationSettings,
     emailDomain, connectEmailDomain, verifyEmailDomain, refreshEmailDomain, setEmailFromAddress,
     emailSettings, updateEmailProvider, disconnectGmail, saveSmtpSettings, clearSmtpSettings, sendTestEmail, fetchEmailSettings,

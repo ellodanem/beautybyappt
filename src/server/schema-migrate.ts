@@ -210,4 +210,68 @@ Time: {time}
   await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_refresh_token_enc', '')");
   await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_address', '')");
   await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('gcal_calendar_id', 'primary')");
+
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_passthrough_enabled', '0')");
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_percent', '0.039')");
+  await run("INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_fee_fixed', '0.30')");
+
+  await run(`CREATE TABLE IF NOT EXISTS payment_links (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token TEXT NOT NULL UNIQUE,
+    staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+    quoted_total REAL NOT NULL DEFAULT 0,
+    deposit_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    expires_at TEXT,
+    client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+    pending_payment_id INTEGER,
+    stripe_checkout_session_id TEXT,
+    fee_passthrough INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    paid_at TEXT
+  )`);
+  await run("CREATE INDEX IF NOT EXISTS idx_payment_links_token ON payment_links(token)");
+  await run("CREATE INDEX IF NOT EXISTS idx_payment_links_status ON payment_links(status)");
+
+  await run(`CREATE TABLE IF NOT EXISTS pending_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    payment_link_id INTEGER REFERENCES payment_links(id) ON DELETE SET NULL,
+    client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+    staff_id INTEGER REFERENCES staff(id) ON DELETE SET NULL,
+    quoted_total REAL NOT NULL DEFAULT 0,
+    amount_paid REAL NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'USD',
+    notes TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open',
+    client_was_existing INTEGER NOT NULL DEFAULT 0,
+    appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
+    stripe_checkout_session_id TEXT,
+    stripe_payment_intent_id TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    applied_at TEXT
+  )`);
+  await run("CREATE INDEX IF NOT EXISTS idx_pending_payments_status ON pending_payments(status)");
+  await run("CREATE INDEX IF NOT EXISTS idx_pending_payments_client ON pending_payments(client_id)");
+
+  const bookingLinkCols = await query<{ name: string }>("PRAGMA table_info(booking_links)");
+  if (bookingLinkCols.length > 0 && !bookingLinkCols.some((c) => c.name === "fee_passthrough")) {
+    await run("ALTER TABLE booking_links ADD COLUMN fee_passthrough INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const paymentsFeeCols = await query<{ name: string }>("PRAGMA table_info(payments)");
+  if (paymentsFeeCols.length > 0 && !paymentsFeeCols.some((c) => c.name === "fee_passthrough")) {
+    await run("ALTER TABLE payments ADD COLUMN fee_passthrough INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const offeringCheckoutCols = await query<{ name: string }>("PRAGMA table_info(offering_booking_checkouts)");
+  if (offeringCheckoutCols.length > 0 && !offeringCheckoutCols.some((c) => c.name === "fee_passthrough")) {
+    await run("ALTER TABLE offering_booking_checkouts ADD COLUMN fee_passthrough INTEGER NOT NULL DEFAULT 0");
+  }
+
+  const anytimeCheckoutCols = await query<{ name: string }>("PRAGMA table_info(anytime_booking_checkouts)");
+  if (anytimeCheckoutCols.length > 0 && !anytimeCheckoutCols.some((c) => c.name === "fee_passthrough")) {
+    await run("ALTER TABLE anytime_booking_checkouts ADD COLUMN fee_passthrough INTEGER NOT NULL DEFAULT 0");
+  }
 }

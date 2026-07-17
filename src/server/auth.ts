@@ -23,6 +23,7 @@ const PUBLIC_API_EXACT = new Set([
 
 const PUBLIC_API_PREFIXES = [
   "/api/book/public/",
+  "/api/pay-link/public/",
   "/api/anytime/public",
   "/api/offer/public/",
   "/api/public/",

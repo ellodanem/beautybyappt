@@ -43,6 +43,8 @@ export function SettingsPage() {
     stripeWebhookConfigured,
     stripePaymentsEnabled,
     updateStripePaymentsEnabled,
+    stripeFeePassthroughEnabled,
+    updateStripeFeePassthroughEnabled,
     notificationSettings,
     updateNotificationSettings,
     emailDomain,
@@ -664,6 +666,30 @@ export function SettingsPage() {
               <code className="text-foreground">stripe listen --forward-to localhost:8787/api/webhooks/stripe</code>
             </p>
           )}
+          <label className={`flex items-start gap-3 ${stripeConfigured && stripePaymentsEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-60"}`}>
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={stripeFeePassthroughEnabled}
+              disabled={!stripeConfigured || !stripePaymentsEnabled || stripeSaving}
+              onChange={async (e) => {
+                setStripeSaving(true);
+                try {
+                  await updateStripeFeePassthroughEnabled((e.target as HTMLInputElement).checked);
+                } catch (err) {
+                  setError((err as Error).message);
+                } finally {
+                  setStripeSaving(false);
+                }
+              }}
+            />
+            <span>
+              <span className="font-medium">Pass Stripe fees to clients</span>
+              <span className="mt-1 block text-muted-foreground">
+                Checkout total is grossed up (intl card rate) so you keep the listed price. Applies to new payment links and checkouts only — existing open links are unchanged.
+              </span>
+            </span>
+          </label>
         </CardContent>
       </Card>
 

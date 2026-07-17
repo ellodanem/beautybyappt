@@ -3,6 +3,7 @@ import { initDB, query, get, run } from "./db.js";
 import { ensureSqliteSchema } from "./schema-migrate.js";
 import { addMinutes, nextIdentifier } from "./helpers.js";
 import { registerBookingLinkRoutes } from "./booking-links.js";
+import { registerPaymentLinkRoutes } from "./payment-links.js";
 import { registerSettingsRoutes, getDefaultCurrency } from "./settings.js";
 import { registerBrandingRoutes } from "./branding.js";
 import { registerOfferingRoutes } from "./offerings.js";
@@ -250,6 +251,7 @@ const ProductSchema = z.object({
 const IdParam = z.object({ id: z.string().openapi({ description: "Resource ID" }) });
 
 registerBookingLinkRoutes(app);
+registerPaymentLinkRoutes(app);
 registerPaymentRoutes(app);
 registerAppointmentPaymentRoutes(app);
 registerSettingsRoutes(app);

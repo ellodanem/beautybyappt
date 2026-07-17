@@ -1,6 +1,6 @@
 import { useApp } from "../context";
 
-import { LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Settings, Menu, X, LogOut } from "lucide-preact";
+import { LayoutDashboard, CalendarDays, Clock, Users, UserCog, Sparkles, Settings, Menu, X, LogOut, Wallet } from "lucide-preact";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -31,6 +31,8 @@ const navItems: { view: View; path: string; label: string; icon: typeof Calendar
   { view: "offers", path: "/offers", label: "Services", icon: Sparkles },
 
   { view: "appointments", path: "/appointments", label: "Appointments", icon: Clock },
+
+  { view: "pending-payments", path: "/pending-payments", label: "Pending payments", icon: Wallet },
 
   { view: "staff", path: "/staff", label: "Staff", icon: UserCog },
 

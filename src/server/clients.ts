@@ -57,12 +57,12 @@ export async function assertClientEmailForBooking(clientId: number): Promise<voi
   if (!parsed.ok) throw new Error(parsed.error);
 }
 
-export async function findOrCreateClient(data: {
+export async function findOrCreateClientResult(data: {
   name: string;
   phone: string;
   email: string;
   address?: string;
-}): Promise<number> {
+}): Promise<{ id: number; existing: boolean }> {
   const parsed = parseRequiredBookingEmail(data.email);
   if (!parsed.ok) throw new Error(parsed.error);
   const email = parsed.email;
@@ -79,7 +79,7 @@ export async function findOrCreateClient(data: {
         "UPDATE clients SET name = ?, phone = ?, address = COALESCE(?, address), updated_at = datetime('now') WHERE id = ?",
         [data.name.trim(), data.phone.trim(), addressUpdate, byEmail.id],
       );
-      return byEmail.id;
+      return { id: byEmail.id, existing: true };
     }
   }
 
@@ -91,7 +91,7 @@ export async function findOrCreateClient(data: {
         "UPDATE clients SET name = ?, email = CASE WHEN ? != '' THEN ? ELSE email END, address = COALESCE(?, address), updated_at = datetime('now') WHERE id = ?",
         [data.name.trim(), email, email, addressUpdate, match.id],
       );
-      return match.id;
+      return { id: match.id, existing: true };
     }
   }
 
@@ -99,5 +99,15 @@ export async function findOrCreateClient(data: {
     "INSERT INTO clients (name, email, phone, address) VALUES (?, ?, ?, ?)",
     [data.name.trim(), email, data.phone.trim(), data.address?.trim() || ""],
   );
-  return Number(result.lastInsertRowid);
+  return { id: Number(result.lastInsertRowid), existing: false };
+}
+
+export async function findOrCreateClient(data: {
+  name: string;
+  phone: string;
+  email: string;
+  address?: string;
+}): Promise<number> {
+  const result = await findOrCreateClientResult(data);
+  return result.id;
 }

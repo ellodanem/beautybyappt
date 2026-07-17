@@ -11,6 +11,10 @@ import {
   finalizeAnytimeBookingCheckout,
   isAnytimeCheckoutMetadata,
 } from "./anytime-payments.js";
+import {
+  finalizePaymentLinkCheckout,
+  isPaymentLinkCheckoutMetadata,
+} from "./payment-link-payments.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 import { runtimeEnv } from "./runtime-env.js";
 import {
@@ -23,6 +27,11 @@ import {
   getStripePaymentsEnabled,
   setStripePaymentsEnabled,
 } from "./stripe-payments-settings.js";
+import {
+  getStripeFeeSettings,
+  setStripeFeePassthroughEnabled,
+  setStripeFeeRate,
+} from "./stripe-fee-settings.js";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerPaymentRoutes(app: OpenAPIHono<any>) {
@@ -76,10 +85,25 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
         } catch (err) {
           console.error("Anytime checkout webhook failed:", (err as Error).message);
         }
+      } else if (isPaymentLinkCheckoutMetadata(metaType) && session.id) {
+        try {
+          await finalizePaymentLinkCheckout(env, session.id);
+        } catch (err) {
+          console.error("Payment link checkout webhook failed:", (err as Error).message);
+        }
       }
     }
 
     return c.json({ received: true }, 200);
+  });
+
+  const stripeSettingsSchema = z.object({
+    configured: z.boolean(),
+    webhook_configured: z.boolean(),
+    payments_enabled: z.boolean(),
+    fee_passthrough_enabled: z.boolean(),
+    fee_percent: z.number(),
+    fee_fixed: z.number(),
   });
 
   const getStripeSettings = createRoute({
@@ -90,11 +114,7 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
         description: "Stripe configuration status",
         content: {
           "application/json": {
-            schema: z.object({
-              configured: z.boolean(),
-              webhook_configured: z.boolean(),
-              payments_enabled: z.boolean(),
-            }),
+            schema: stripeSettingsSchema,
           },
         },
       },
@@ -103,10 +123,14 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
 
   app.openapi(getStripeSettings, async (c) => {
     const env = runtimeEnv(c.env) as StripeEnv;
+    const feeSettings = await getStripeFeeSettings();
     return c.json({
       configured: isStripeConfigured(env),
       webhook_configured: Boolean(env.STRIPE_WEBHOOK_SECRET?.trim()),
       payments_enabled: await getStripePaymentsEnabled(),
+      fee_passthrough_enabled: feeSettings.fee_passthrough_enabled,
+      fee_percent: feeSettings.fee_percent,
+      fee_fixed: feeSettings.fee_fixed,
     }, 200);
   });
 
@@ -117,7 +141,12 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
       body: {
         content: {
           "application/json": {
-            schema: z.object({ payments_enabled: z.boolean() }),
+            schema: z.object({
+              payments_enabled: z.boolean().optional(),
+              fee_passthrough_enabled: z.boolean().optional(),
+              fee_percent: z.number().optional(),
+              fee_fixed: z.number().optional(),
+            }),
           },
         },
       },
@@ -127,11 +156,7 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
         description: "Updated",
         content: {
           "application/json": {
-            schema: z.object({
-              configured: z.boolean(),
-              webhook_configured: z.boolean(),
-              payments_enabled: z.boolean(),
-            }),
+            schema: stripeSettingsSchema,
           },
         },
       },
@@ -144,15 +169,31 @@ export function registerPaymentRoutes(app: OpenAPIHono<any>) {
 
   app.openapi(updateStripeSettings, async (c) => {
     const env = runtimeEnv(c.env) as StripeEnv;
-    const { payments_enabled } = c.req.valid("json");
-    if (payments_enabled && !isStripeConfigured(env)) {
+    const body = c.req.valid("json");
+    if (body.payments_enabled === true && !isStripeConfigured(env)) {
       return c.json({ error: "Add STRIPE_SECRET_KEY before enabling online payments" }, 400);
     }
-    await setStripePaymentsEnabled(payments_enabled);
+    if (body.payments_enabled !== undefined) {
+      await setStripePaymentsEnabled(body.payments_enabled);
+    }
+    if (body.fee_passthrough_enabled !== undefined) {
+      await setStripeFeePassthroughEnabled(body.fee_passthrough_enabled);
+    }
+    if (body.fee_percent !== undefined || body.fee_fixed !== undefined) {
+      const current = await getStripeFeeSettings();
+      await setStripeFeeRate(
+        body.fee_percent ?? current.fee_percent,
+        body.fee_fixed ?? current.fee_fixed,
+      );
+    }
+    const feeSettings = await getStripeFeeSettings();
     return c.json({
       configured: isStripeConfigured(env),
       webhook_configured: Boolean(env.STRIPE_WEBHOOK_SECRET?.trim()),
       payments_enabled: await getStripePaymentsEnabled(),
+      fee_passthrough_enabled: feeSettings.fee_passthrough_enabled,
+      fee_percent: feeSettings.fee_percent,
+      fee_fixed: feeSettings.fee_fixed,
     }, 200);
   });
 }

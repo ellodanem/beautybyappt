@@ -18,6 +18,7 @@ import {
   linkRequiresPayment,
 } from "./booking-link-payments.js";
 import { isStripePaymentsActive } from "./stripe-payments-settings.js";
+import { snapshotFeePassthrough } from "./stripe-fee-settings.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 import {
   bookingLinkCheckoutAmount,
@@ -164,13 +165,14 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
 
     const token = generateBookingToken();
     const expiresAt = bookingLinkExpiresAt();
+    const feePassthrough = await snapshotFeePassthrough();
 
     let currency = body.currency || (await getDefaultCurrency());
     if (!isValidCurrency(currency)) currency = DEFAULT_CURRENCY;
 
     const result = await run(
-      `INSERT INTO booking_links (token, staff_id, scheduled_date, start_time, end_time, total_price, deposit_amount, travel_fee, currency, notes, service_ids, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO booking_links (token, staff_id, scheduled_date, start_time, end_time, total_price, deposit_amount, travel_fee, currency, notes, service_ids, expires_at, fee_passthrough)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         token,
         body.staff_id,
@@ -184,6 +186,7 @@ export function registerBookingLinkRoutes(app: OpenAPIHono<any>) {
         body.notes || "",
         JSON.stringify(serviceIds),
         expiresAt,
+        feePassthrough ? 1 : 0,
       ],
     );
 

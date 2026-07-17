@@ -20,6 +20,7 @@ export type LinkRow = {
   appointment_id: number | null;
   client_id: number | null;
   stripe_checkout_session_id: string | null;
+  fee_passthrough?: number;
   created_at: string;
   confirmed_at: string | null;
   staff_name?: string;

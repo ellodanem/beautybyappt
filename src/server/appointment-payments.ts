@@ -22,6 +22,8 @@ import {
 import { formatMoney } from "../shared/currency.js";
 import { scheduleBookingConfirmation } from "./notifications.js";
 import { generateBookingToken } from "./helpers.js";
+import { snapshotFeePassthrough } from "./stripe-fee-settings.js";
+import { feeCheckoutMetadata, maybeGrossUpLineItems } from "./stripe-checkout-fees.js";
 
 const ErrorSchema = z.object({ error: z.string() }).openapi("AppointmentPaymentError");
 
@@ -244,8 +246,9 @@ async function loadPaymentByToken(token: string) {
     stripe_checkout_session_id: string | null;
     amount: number;
     currency: string;
+    fee_passthrough: number | null;
   }>(
-    `SELECT id, appointment_id, status, stripe_checkout_session_id, amount, currency FROM payments
+    `SELECT id, appointment_id, status, stripe_checkout_session_id, amount, currency, fee_passthrough FROM payments
      WHERE link_token = ? AND status IN ('open', 'pending')`,
     [token],
   );
@@ -288,9 +291,9 @@ export async function createAppointmentPaymentLink(
   const depositDue = appointmentCheckoutAmount(apt, "deposit");
 
   await run(
-    `INSERT INTO payments (appointment_id, link_token, amount, currency, type, status)
-     VALUES (?, ?, 0, ?, 'link', 'open')`,
-    [appointmentId, token, currency],
+    `INSERT INTO payments (appointment_id, link_token, amount, currency, type, status, fee_passthrough)
+     VALUES (?, ?, 0, ?, 'link', 'open', ?)`,
+    [appointmentId, token, currency, (await snapshotFeePassthrough()) ? 1 : 0],
   );
 
   if (options?.addNote !== false) {
@@ -361,17 +364,33 @@ export async function createAppointmentStripeCheckout(
   const hasChoice = appointmentHasPaymentChoice(apt);
   const choice: PaymentChoice = hasChoice && paymentChoice === "deposit" ? "deposit" : "full";
   const amount = Math.round(appointmentCheckoutAmount(apt, choice) * 100) / 100;
+  const currency = (apt.currency || payment.currency || "USD").toUpperCase();
+  const minCharge = minChargeAmount(currency);
+  if (amount < minCharge) {
+    throw new Error(`Amount must be at least ${currency} ${minCharge.toFixed(2)} to collect via Stripe`);
+  }
+
+  const checkoutCopy = appointmentCheckoutCopy(apt, amountPaid, balance, amount, currency);
+  const feePassthrough = Boolean(payment.fee_passthrough);
+  const feeAdjusted = await maybeGrossUpLineItems(
+    [{
+      name: checkoutCopy.name,
+      description: checkoutCopy.description,
+      amount,
+    }],
+    feePassthrough,
+  );
 
   if (payment.status === "pending" && payment.stripe_checkout_session_id) {
     try {
       const existing = await retrieveCheckoutSession(env, payment.stripe_checkout_session_id);
       if (existing.url && existing.payment_status !== "paid") {
         const existingAmount = existing.amount_total != null ? existing.amount_total / 100 : payment.amount;
-        if (Math.abs(existingAmount - amount) < 0.01) {
+        if (Math.abs(existingAmount - feeAdjusted.gross_amount) < 0.01) {
           return {
             checkout_url: existing.url,
             session_id: existing.id,
-            amount: payment.amount,
+            amount: payment.amount > 0 ? payment.amount : amount,
             currency: payment.currency,
           };
         }
@@ -382,22 +401,10 @@ export async function createAppointmentStripeCheckout(
     }
   }
 
-  const currency = (apt.currency || payment.currency || "USD").toUpperCase();
-  const minCharge = minChargeAmount(currency);
-  if (amount < minCharge) {
-    throw new Error(`Amount must be at least ${currency} ${minCharge.toFixed(2)} to collect via Stripe`);
-  }
-
   const base = appBaseUrl(env, requestUrl);
-  const checkoutCopy = appointmentCheckoutCopy(apt, amountPaid, balance, amount, currency);
-
   const session = await createCheckoutSession(env, {
     currency,
-    lineItems: [{
-      name: checkoutCopy.name,
-      description: checkoutCopy.description,
-      amount,
-    }],
+    lineItems: feeAdjusted.lineItems,
     successUrl: `${base}/pay/success?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}/pay/${token}?cancelled=1`,
     customerEmail: apt.client_email ?? undefined,
@@ -408,6 +415,7 @@ export async function createAppointmentStripeCheckout(
       amount: amount.toFixed(2),
       identifier: apt.identifier,
       payment_choice: choice,
+      ...feeCheckoutMetadata(feeAdjusted),
     },
   });
 

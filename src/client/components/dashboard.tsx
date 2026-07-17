@@ -18,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { MobileNavTrigger } from "./mobile-nav-trigger";
 import { StatusBadge } from "./status-badge";
 import { PaymentBadge } from "./payment-badge";
-import { CreateBookingLink } from "./create-booking-link";
+import { CreatePaymentLink } from "./create-payment-link";
 import { CreateAppointment } from "./create-appointment";
 import { DualCurrencyAmount } from "./dual-currency-amount";
 import { cn, formatTimeShort } from "@/lib/utils";
@@ -425,7 +425,15 @@ export function Dashboard() {
                 onClick={() => setShowBookingLink(true)}
               >
                 <Link2 className="h-4 w-4 shrink-0" />
-                Create booking link
+                Create payment link
+              </Button>
+              <Button
+                variant="outline"
+                className="h-11 w-full justify-start gap-2 md:h-10"
+                onClick={() => navigate("/pending-payments")}
+              >
+                <DollarSign className="h-4 w-4 shrink-0" />
+                Pending payments
               </Button>
               <Button
                 variant="outline"
@@ -500,7 +508,7 @@ export function Dashboard() {
       )}
 
       {showBookingLink && (
-        <CreateBookingLink onClose={() => setShowBookingLink(false)} defaultDate={todayStr} />
+        <CreatePaymentLink onClose={() => setShowBookingLink(false)} />
       )}
       {showCreateAppointment && (
         <CreateAppointment onClose={() => setShowCreateAppointment(false)} defaultDate={todayStr} />
