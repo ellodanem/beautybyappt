@@ -437,9 +437,10 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
         content: {
           "application/json": {
             schema: z.object({
+              appointment_id: z.number().int().optional(),
               staff_id: z.number().int().nullable().optional(),
-              scheduled_date: z.string(),
-              start_time: z.string(),
+              scheduled_date: z.string().optional(),
+              start_time: z.string().optional(),
               duration_minutes: z.number().int().optional(),
               end_time: z.string().optional(),
               service_ids: z.array(z.number().int()).optional(),
@@ -484,6 +485,71 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
       return c.json({ error: "This payment is no longer open" }, 400);
     }
 
+    const currency = pending.currency || (await getDefaultCurrency());
+
+    // Apply credit to an existing appointment (optional linking)
+    if (body.appointment_id != null) {
+      const apt = await get<{
+        id: number;
+        identifier: string;
+        client_id: number;
+        total_price: number;
+        deposit_amount: number;
+        amount_paid: number;
+        currency: string | null;
+      }>(
+        "SELECT id, identifier, client_id, total_price, deposit_amount, amount_paid, currency FROM appointments WHERE id = ?",
+        [body.appointment_id],
+      );
+      if (!apt) return c.json({ error: "Appointment not found" }, 404);
+      if (apt.client_id !== pending.client_id) {
+        return c.json({ error: "Appointment belongs to a different client" }, 400);
+      }
+
+      const amountPaidBefore = apt.amount_paid ?? 0;
+      const amountApplied = Math.round(pending.amount_paid * 100) / 100;
+      const newAmountPaid = Math.round((amountPaidBefore + amountApplied) * 100) / 100;
+      const paymentStatus = derivePaymentStatus(
+        apt.total_price,
+        apt.deposit_amount ?? 0,
+        newAmountPaid,
+      );
+
+      await run(
+        `UPDATE appointments SET amount_paid = ?, payment_status = ?, updated_at = datetime('now') WHERE id = ?`,
+        [newAmountPaid, paymentStatus, apt.id],
+      );
+
+      await run(
+        `UPDATE pending_payments SET status = 'applied', appointment_id = ?, applied_at = datetime('now') WHERE id = ?`,
+        [apt.id, id],
+      );
+
+      await run(
+        `UPDATE payments SET appointment_id = ? WHERE stripe_checkout_session_id = ? AND appointment_id IS NULL`,
+        [apt.id, pending.stripe_checkout_session_id],
+      );
+
+      await run(
+        "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
+        [
+          apt.id,
+          `Applied open payment ${currency} ${amountApplied.toFixed(2)} from payment link`,
+        ],
+      );
+
+      return c.json({
+        appointment_id: apt.id,
+        identifier: apt.identifier,
+        amount_applied: amountApplied,
+        balance_due: Math.max(0, Math.round((apt.total_price - newAmountPaid) * 100) / 100),
+      });
+    }
+
+    if (!body.scheduled_date || !body.start_time) {
+      return c.json({ error: "Provide scheduled_date and start_time, or appointment_id to link an existing booking" }, 400);
+    }
+
     const staffId = body.staff_id !== undefined ? body.staff_id : pending.staff_id;
     if (staffId != null) {
       const staff = await get<{ id: number }>("SELECT id FROM staff WHERE id = ? AND active = 1", [staffId]);
@@ -523,7 +589,6 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
     const amountApplied = Math.min(pending.amount_paid, totalPrice);
     const paymentStatus = derivePaymentStatus(totalPrice, pending.amount_paid, amountApplied);
     const identifier = await nextIdentifier();
-    const currency = pending.currency || (await getDefaultCurrency());
 
     const aptResult = await run(
       `INSERT INTO appointments (
@@ -574,7 +639,7 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
       "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
       [
         appointmentId,
-        `Applied pending payment ${currency} ${amountApplied.toFixed(2)} (quoted ${currency} ${pending.quoted_total.toFixed(2)})`,
+        `Applied open payment ${currency} ${amountApplied.toFixed(2)} (quoted ${currency} ${pending.quoted_total.toFixed(2)})`,
       ],
     );
 

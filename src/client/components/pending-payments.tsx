@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from "@/components/ui/dialog";
 import { formatMoney } from "../../shared/currency";
-import { cn } from "@/lib/utils";
+import { cn, formatTimeShort } from "@/lib/utils";
+import type { Appointment } from "../types";
 
 function Pill({ children, className }: { children: ComponentChildren; className?: string }) {
   return (
@@ -53,6 +54,10 @@ function ApplyPendingDialog({
   onApplied: (appointmentId: number) => void;
 }) {
   const { staffLookup, services, setError } = useApp();
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [clientApts, setClientApts] = useState<Appointment[]>([]);
+  const [loadingApts, setLoadingApts] = useState(true);
+  const [selectedAptId, setSelectedAptId] = useState("");
   const [staffId, setStaffId] = useState(pending.staff_id ? String(pending.staff_id) : "");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [startTime, setStartTime] = useState("09:00");
@@ -63,6 +68,27 @@ function ApplyPendingDialog({
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState(pending.notes || "");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setLoadingApts(true);
+    api<{ appointments: Appointment[] }>("GET", `/api/clients/${pending.client_id}`)
+      .then((res) => {
+        const list = (res.appointments ?? []).filter(
+          (apt) => apt.status !== "cancelled" && apt.status !== "no_show",
+        );
+        setClientApts(list);
+        if (list.length === 0) setMode("new");
+        else {
+          setMode("existing");
+          setSelectedAptId(String(list[0].id));
+        }
+      })
+      .catch(() => {
+        setClientApts([]);
+        setMode("new");
+      })
+      .finally(() => setLoadingApts(false));
+  }, [pending.client_id]);
 
   const toggleService = (id: number) => {
     setSelectedServices((prev) =>
@@ -81,6 +107,19 @@ function ApplyPendingDialog({
   const handleApply = async () => {
     setSaving(true);
     try {
+      if (mode === "existing") {
+        if (!selectedAptId) {
+          setError("Select an appointment");
+          setSaving(false);
+          return;
+        }
+        const res = await api<{ appointment_id: number }>("POST", `/api/pending-payments/${pending.id}/apply`, {
+          appointment_id: parseInt(selectedAptId, 10),
+        });
+        onApplied(res.appointment_id);
+        return;
+      }
+
       const res = await api<{ appointment_id: number }>("POST", `/api/pending-payments/${pending.id}/apply`, {
         staff_id: staffId ? parseInt(staffId, 10) : null,
         scheduled_date: date,
@@ -104,98 +143,169 @@ function ApplyPendingDialog({
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Schedule & apply payment</DialogTitle>
+          <DialogTitle>Apply payment (optional)</DialogTitle>
         </DialogHeader>
         <DialogBody>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Credit available: {formatMoney(pending.amount_paid, pending.currency)}
+              Credit: {formatMoney(pending.amount_paid, pending.currency)}
               {pending.quoted_total > 0 && <> · Quoted {formatMoney(pending.quoted_total, pending.currency)}</>}
+              . You can leave this open in the ledger and apply later.
             </p>
-            <div className="space-y-1.5">
-              <Label>Staff</Label>
-              <select
-                className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
-                value={staffId}
-                onChange={(e) => setStaffId((e.target as HTMLSelectElement).value)}
-              >
-                <option value="">Unassigned</option>
-                {staffLookup.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Date</Label>
-                <Input type="date" className="h-11" value={date} onChange={(e) => setDate((e.target as HTMLInputElement).value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Start time</Label>
-                <Input type="time" className="h-11" value={startTime} onChange={(e) => setStartTime((e.target as HTMLInputElement).value)} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Duration (min)</Label>
-                <Input type="number" className="h-11" value={duration} onChange={(e) => setDuration((e.target as HTMLInputElement).value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Appointment total</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  className="h-11"
-                  value={customPrice}
-                  onChange={(e) => setCustomPrice((e.target as HTMLInputElement).value)}
+
+            <div className="space-y-2 rounded-lg border p-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="apply-mode"
+                  className="mt-1"
+                  checked={mode === "existing"}
+                  disabled={loadingApts || clientApts.length === 0}
+                  onChange={() => setMode("existing")}
                 />
-              </div>
+                <span className="text-sm">
+                  <span className="font-medium">Link to existing appointment</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    {loadingApts
+                      ? "Loading…"
+                      : clientApts.length === 0
+                        ? "No upcoming appointments for this client"
+                        : "Apply credit toward a booking already on the calendar"}
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="apply-mode"
+                  className="mt-1"
+                  checked={mode === "new"}
+                  onChange={() => setMode("new")}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Create new appointment</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    Schedule now and apply this credit
+                  </span>
+                </span>
+              </label>
             </div>
-            {services.length > 0 && (
-              <div className="space-y-2">
-                <Label>Services (optional)</Label>
-                <div className="flex flex-wrap gap-2">
-                  {services.filter((s) => s.active).map((svc) => (
-                    <button
-                      key={svc.id}
-                      type="button"
-                      className={cn(
-                        "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                        selectedServices.includes(svc.id)
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-input hover:bg-muted",
-                      )}
-                      onClick={() => toggleService(svc.id)}
-                    >
-                      {svc.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label>Travel fee (optional)</Label>
-              <Input type="number" step="0.01" className="h-11" value={travelFee} onChange={(e) => setTravelFee((e.target as HTMLInputElement).value)} />
-            </div>
-            {travel > 0 && (
+
+            {mode === "existing" && clientApts.length > 0 && (
               <div className="space-y-1.5">
-                <Label>Service address</Label>
-                <Input className="h-11" value={address} onChange={(e) => setAddress((e.target as HTMLInputElement).value)} />
+                <Label>Appointment</Label>
+                <select
+                  className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={selectedAptId}
+                  onChange={(e) => setSelectedAptId((e.target as HTMLSelectElement).value)}
+                >
+                  {clientApts.map((apt) => (
+                    <option key={apt.id} value={apt.id}>
+                      {apt.identifier} · {apt.scheduled_date} {formatTimeShort(apt.start_time)}
+                      {apt.staff_name ? ` · ${apt.staff_name}` : ""}
+                      {" · "}
+                      paid {formatMoney(apt.amount_paid ?? 0, apt.currency || pending.currency)}
+                      {" / "}
+                      {formatMoney(apt.total_price, apt.currency || pending.currency)}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Will add {formatMoney(pending.amount_paid, pending.currency)} to amount paid on that booking.
+                </p>
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Input className="h-11" value={notes} onChange={(e) => setNotes((e.target as HTMLInputElement).value)} />
-            </div>
-            <p className="text-sm">
-              Apply {formatMoney(applied, pending.currency)}
-              {balance > 0 && <> · Balance due {formatMoney(balance, pending.currency)}</>}
-            </p>
+
+            {mode === "new" && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Staff</Label>
+                  <select
+                    className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={staffId}
+                    onChange={(e) => setStaffId((e.target as HTMLSelectElement).value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {staffLookup.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Date</Label>
+                    <Input type="date" className="h-11" value={date} onChange={(e) => setDate((e.target as HTMLInputElement).value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Start time</Label>
+                    <Input type="time" className="h-11" value={startTime} onChange={(e) => setStartTime((e.target as HTMLInputElement).value)} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Duration (min)</Label>
+                    <Input type="number" className="h-11" value={duration} onChange={(e) => setDuration((e.target as HTMLInputElement).value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Appointment total</Label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      className="h-11"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice((e.target as HTMLInputElement).value)}
+                    />
+                  </div>
+                </div>
+                {services.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Services (optional)</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {services.filter((s) => s.active).map((svc) => (
+                        <button
+                          key={svc.id}
+                          type="button"
+                          className={cn(
+                            "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                            selectedServices.includes(svc.id)
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-input hover:bg-muted",
+                          )}
+                          onClick={() => toggleService(svc.id)}
+                        >
+                          {svc.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label>Travel fee (optional)</Label>
+                  <Input type="number" step="0.01" className="h-11" value={travelFee} onChange={(e) => setTravelFee((e.target as HTMLInputElement).value)} />
+                </div>
+                {travel > 0 && (
+                  <div className="space-y-1.5">
+                    <Label>Service address</Label>
+                    <Input className="h-11" value={address} onChange={(e) => setAddress((e.target as HTMLInputElement).value)} />
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label>Notes</Label>
+                  <Input className="h-11" value={notes} onChange={(e) => setNotes((e.target as HTMLInputElement).value)} />
+                </div>
+                <p className="text-sm">
+                  Apply {formatMoney(applied, pending.currency)}
+                  {balance > 0 && <> · Balance due {formatMoney(balance, pending.currency)}</>}
+                </p>
+              </>
+            )}
           </div>
         </DialogBody>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={saving} onClick={handleApply}>{saving ? "Saving…" : "Create appointment"}</Button>
+          <Button variant="outline" onClick={onClose}>Leave open</Button>
+          <Button disabled={saving || (mode === "existing" && !selectedAptId)} onClick={handleApply}>
+            {saving ? "Saving…" : mode === "existing" ? "Apply credit" : "Create & apply"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -240,19 +350,20 @@ export function PendingPaymentsPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Pending payments</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Paid clients waiting to be scheduled. No automatic refunds — refund in Stripe, then mark here.
+          Open credits from payment links — an audit trail of who paid. Linking to an appointment is optional.
+          No automatic refunds; refund in Stripe, then mark here.
         </p>
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Open ({items.length})</CardTitle>
+          <CardTitle className="text-base">Open credits ({items.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
           ) : items.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">No pending payments</p>
+            <p className="py-6 text-center text-sm text-muted-foreground">No open payments</p>
           ) : (
             <ul className="divide-y">
               {items.map((item) => {
@@ -289,9 +400,12 @@ export function PendingPaymentsPage() {
                           {[item.client_email, item.client_phone].filter(Boolean).join(" · ")}
                         </p>
                       )}
+                      {item.notes && (
+                        <p className="truncate text-xs text-muted-foreground">{item.notes}</p>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" onClick={() => setApplyTarget(item)}>Schedule</Button>
+                      <Button size="sm" onClick={() => setApplyTarget(item)}>Apply to appointment</Button>
                       <Button size="sm" variant="outline" onClick={() => markRefunded(item.id)}>Mark refunded</Button>
                     </div>
                   </li>

@@ -109,7 +109,7 @@ export function CreatePaymentLink({ onClose }: Props) {
                 ) : (
                   <> Amount: {formatMoney(createdPrice, createdCurrency)}.</>
                 )}
-                {" "}After payment, it appears in Pending payments so you can schedule later. Link expires in 48 hours.
+                {" "}After payment it shows under Pending payments as an open credit — you can leave it, or optionally apply it to an appointment. Link expires in 48 hours.
               </p>
               <div className="flex gap-2">
                 <Input readOnly value={createdUrl} className="h-11 text-sm" />

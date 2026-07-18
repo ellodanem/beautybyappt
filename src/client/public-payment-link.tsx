@@ -194,7 +194,7 @@ export function PublicPaymentLinkPage({ token }: { token: string }) {
               {submitting ? "Redirecting…" : `Pay ${formatMoney(payNow, link.currency)}`}
             </Button>
             <p className="text-center text-xs text-muted-foreground">
-              After payment we’ll confirm your appointment time with you.
+              Payment received — thank you. The business will follow up if needed.
             </p>
           </CardContent>
         </Card>

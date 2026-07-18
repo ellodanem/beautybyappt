@@ -25,7 +25,7 @@ export function PublicPaymentLinkSuccessPage({ token }: { token: string }) {
     )
       .then(() => {
         setStatus("ok");
-        setMessage("Payment received. We’ll confirm your appointment time shortly.");
+        setMessage("Payment received. Thank you.");
       })
       .catch((err) => {
         setStatus("error");
