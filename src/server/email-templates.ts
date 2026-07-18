@@ -113,6 +113,32 @@ Time: {time}
 — {business_name}`,
 };
 
+const BUILTIN_APPOINTMENT_CONFIRMATION = {
+  slug: "appointment_confirmation",
+  name: "Appointment confirmation",
+  subject: "Appointment confirmed — {reference}",
+  body: `Hi {client_name},
+
+Your appointment with {business_name} is confirmed.
+
+Reference: {reference}
+Date: {date}
+Time: {time}
+{event_name}
+{services}
+{location}
+
+Total: {total}
+Amount paid: {amount_paid}
+Balance due: {balance_due}
+
+{payment_link}
+
+We look forward to seeing you.
+
+— {business_name}`,
+};
+
 function rowToTemplate(row: {
   id: number;
   slug: string;
@@ -149,6 +175,16 @@ export async function ensureBuiltinEmailTemplates(): Promise<void> {
       BUILTIN_APPOINTMENT_REMINDER.name,
       BUILTIN_APPOINTMENT_REMINDER.subject,
       BUILTIN_APPOINTMENT_REMINDER.body,
+    ],
+  );
+  await run(
+    `INSERT OR IGNORE INTO email_templates (slug, name, subject, body, is_builtin)
+     VALUES (?, ?, ?, ?, 1)`,
+    [
+      BUILTIN_APPOINTMENT_CONFIRMATION.slug,
+      BUILTIN_APPOINTMENT_CONFIRMATION.name,
+      BUILTIN_APPOINTMENT_CONFIRMATION.subject,
+      BUILTIN_APPOINTMENT_CONFIRMATION.body,
     ],
   );
 }

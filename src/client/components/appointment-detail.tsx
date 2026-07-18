@@ -686,7 +686,7 @@ export function AppointmentDetail() {
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Send a prewritten template to {apt.client_email || "the client"}.
-                {previewBalance > 0 && " Payment reminder includes balance and payment link when available."}
+                {previewBalance > 0 && " Templates include balance and payment link when available."}
               </p>
               {emailTemplates.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No templates yet — add them in Settings.</p>
