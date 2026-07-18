@@ -133,15 +133,6 @@ export function AppointmentDetail() {
   const previewBalance = appointmentBalance(previewTotal, previewPaid);
   const paymentLinkUrl = lastPaymentLinkUrl ?? apt.pending_payment?.page_url ?? apt.pending_payment?.checkout_url ?? null;
 
-  const paymentPreview: Appointment = {
-    ...apt,
-    total_price: previewTotal,
-    deposit_amount: previewDeposit,
-    amount_paid: previewPaid,
-    payment_status: previewDeposit > 0 || previewPaid > 0 ? "deposit_paid" : "not_required",
-    currency,
-  };
-
   const paymentDirty =
     previewTotal !== (apt.total_price ?? 0)
     || previewDeposit !== (apt.deposit_amount ?? 0)
@@ -410,7 +401,7 @@ export function AppointmentDetail() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
               <CardTitle>Payment</CardTitle>
-              <PaymentBadge appointment={paymentPreview} />
+              <PaymentBadge appointment={apt} />
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-xs text-muted-foreground">
