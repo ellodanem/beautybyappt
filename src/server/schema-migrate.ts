@@ -276,6 +276,7 @@ We look forward to seeing you.
     notes TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'open',
     client_was_existing INTEGER NOT NULL DEFAULT 0,
+    client_reviewed_at TEXT,
     appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
     stripe_checkout_session_id TEXT,
     stripe_payment_intent_id TEXT,
@@ -284,6 +285,11 @@ We look forward to seeing you.
   )`);
   await run("CREATE INDEX IF NOT EXISTS idx_pending_payments_status ON pending_payments(status)");
   await run("CREATE INDEX IF NOT EXISTS idx_pending_payments_client ON pending_payments(client_id)");
+
+  const pendingPaymentCols = await query<{ name: string }>("PRAGMA table_info(pending_payments)");
+  if (pendingPaymentCols.length > 0 && !pendingPaymentCols.some((c) => c.name === "client_reviewed_at")) {
+    await run("ALTER TABLE pending_payments ADD COLUMN client_reviewed_at TEXT");
+  }
 
   const bookingLinkCols = await query<{ name: string }>("PRAGMA table_info(booking_links)");
   if (bookingLinkCols.length > 0 && !bookingLinkCols.some((c) => c.name === "fee_passthrough")) {

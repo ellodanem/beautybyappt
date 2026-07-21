@@ -11,7 +11,8 @@ import {
   addMinutes,
   nextIdentifier,
 } from "./helpers.js";
-import { findOrCreateClientResult } from "./clients.js";
+import { findOrCreateClientResult, findClientMatches, tryDeleteOrphanClient } from "./clients.js";
+import { parseRequiredBookingEmail } from "../shared/email.js";
 import { isStripePaymentsActive } from "./stripe-payments-settings.js";
 import { snapshotFeePassthrough } from "./stripe-fee-settings.js";
 import { derivePaymentStatus, type PaymentChoice } from "../shared/payment.js";
@@ -60,6 +61,7 @@ const PendingPaymentSchema = z.object({
   notes: z.string(),
   status: z.string(),
   client_was_existing: z.boolean(),
+  client_reviewed_at: z.string().nullable(),
   appointment_id: z.number().int().nullable(),
   created_at: z.string(),
   applied_at: z.string().nullable(),
@@ -67,6 +69,14 @@ const PendingPaymentSchema = z.object({
   client_email: z.string().optional(),
   client_phone: z.string().optional(),
   staff_name: z.string().nullable().optional(),
+});
+
+const ClientMatchSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  email: z.string(),
+  phone: z.string(),
+  match: z.enum(["email", "phone", "both"]),
 });
 
 function formatPaymentLink(row: PaymentLinkRow) {
@@ -110,6 +120,7 @@ type PendingRow = {
   notes: string;
   status: string;
   client_was_existing: number;
+  client_reviewed_at: string | null;
   appointment_id: number | null;
   stripe_checkout_session_id: string | null;
   stripe_payment_intent_id: string | null;
@@ -133,6 +144,7 @@ function formatPending(row: PendingRow) {
     notes: row.notes,
     status: row.status,
     client_was_existing: Boolean(row.client_was_existing),
+    client_reviewed_at: row.client_reviewed_at ?? null,
     appointment_id: row.appointment_id,
     created_at: row.created_at,
     applied_at: row.applied_at,
@@ -141,6 +153,18 @@ function formatPending(row: PendingRow) {
     client_phone: row.client_phone,
     staff_name: row.staff_name ?? null,
   };
+}
+
+async function loadPendingWithClient(id: number): Promise<PendingRow | null> {
+  const row = await get<PendingRow>(
+    `SELECT pp.*, c.name as client_name, c.email as client_email, c.phone as client_phone, s.name as staff_name
+     FROM pending_payments pp
+     JOIN clients c ON c.id = pp.client_id
+     LEFT JOIN staff s ON s.id = pp.staff_id
+     WHERE pp.id = ?`,
+    [id],
+  );
+  return row ?? null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -395,7 +419,7 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
     path: "/api/pending-payments",
     request: {
       query: z.object({
-        status: z.enum(["open", "applied", "refunded", "all"]).optional(),
+        status: z.enum(["open", "applied", "refunded", "captured", "all"]).optional(),
       }),
     },
     responses: {
@@ -422,7 +446,9 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
        JOIN clients c ON c.id = pp.client_id
        LEFT JOIN staff s ON s.id = pp.staff_id
        WHERE ${statusClause}
-       ORDER BY CASE WHEN pp.client_was_existing = 1 THEN 0 ELSE 1 END, pp.created_at DESC`,
+       ORDER BY CASE WHEN pp.client_reviewed_at IS NULL THEN 0 ELSE 1 END,
+                CASE WHEN pp.client_was_existing = 1 THEN 0 ELSE 1 END,
+                pp.created_at DESC`,
       params,
     );
     return c.json({ pending_payments: rows.map(formatPending) });
@@ -483,6 +509,9 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
     if (!pending) return c.json({ error: "Pending payment not found" }, 404);
     if (pending.status !== "open") {
       return c.json({ error: "This payment is no longer open" }, 400);
+    }
+    if (!pending.client_reviewed_at) {
+      return c.json({ error: "Review and approve the client before applying this payment" }, 400);
     }
 
     const currency = pending.currency || (await getDefaultCurrency());
@@ -699,14 +728,311 @@ export function registerPaymentLinkRoutes(app: OpenAPIHono<any>) {
       [notes, id],
     );
 
-    const row = await get<PendingRow>(
-      `SELECT pp.*, c.name as client_name, c.email as client_email, c.phone as client_phone, s.name as staff_name
-       FROM pending_payments pp
-       JOIN clients c ON c.id = pp.client_id
-       LEFT JOIN staff s ON s.id = pp.staff_id
-       WHERE pp.id = ?`,
-      [id],
+    const row = await loadPendingWithClient(id);
+    if (!row) return c.json({ error: "Pending payment not found" }, 404);
+    return c.json({ pending_payment: formatPending(row) });
+  }) as any);
+
+  const capturePending = createRoute({
+    method: "post",
+    path: "/api/pending-payments/{id}/capture",
+    request: {
+      params: z.object({ id: z.coerce.number().int() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              mode: z.enum(["money_only", "record_visit"]),
+              note: z.string().optional(),
+              staff_id: z.number().int().nullable().optional(),
+              scheduled_date: z.string().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Payment captured",
+        content: {
+          "application/json": {
+            schema: z.object({
+              pending_payment: PendingPaymentSchema,
+              appointment_id: z.number().int().nullable(),
+            }),
+          },
+        },
+      },
+      400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(capturePending, (async (c: any) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const pending = await get<PendingRow>("SELECT * FROM pending_payments WHERE id = ?", [id]);
+    if (!pending) return c.json({ error: "Pending payment not found" }, 404);
+    if (pending.status !== "open") {
+      return c.json({ error: "Only open pending payments can be captured" }, 400);
+    }
+    if (!pending.client_reviewed_at) {
+      return c.json({ error: "Review and approve the client before capturing this payment" }, 400);
+    }
+
+    const note = body.note?.trim();
+    const currency = pending.currency || (await getDefaultCurrency());
+    let appointmentId: number | null = null;
+
+    if (body.mode === "record_visit") {
+      const staffId = body.staff_id !== undefined ? body.staff_id : pending.staff_id;
+      if (staffId != null) {
+        const staff = await get<{ id: number }>("SELECT id FROM staff WHERE id = ? AND active = 1", [staffId]);
+        if (!staff) return c.json({ error: "Staff not found" }, 404);
+      }
+
+      const scheduledDate = (body.scheduled_date || new Date().toISOString().split("T")[0]).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
+        return c.json({ error: "scheduled_date must be YYYY-MM-DD" }, 400);
+      }
+
+      const amountPaid = Math.round(pending.amount_paid * 100) / 100;
+      const quotedFallback = pending.quoted_total > 0 ? pending.quoted_total : amountPaid;
+      const totalPrice = Math.round(quotedFallback * 100) / 100;
+      const paymentStatus = derivePaymentStatus(totalPrice, amountPaid, amountPaid);
+      const identifier = await nextIdentifier();
+      const startTime = "12:00";
+      const endTime = addMinutes(startTime, 60);
+      const visitNoteParts = [
+        pending.notes?.trim() || "",
+        `Captured payment ${currency} ${amountPaid.toFixed(2)} — visit recorded (not linked to a prior booking)`,
+        note ? `Note: ${note}` : "",
+      ].filter(Boolean);
+
+      const aptResult = await run(
+        `INSERT INTO appointments (
+          identifier, client_id, staff_id, status, scheduled_date, start_time, end_time,
+          total_price, currency, deposit_amount, amount_paid, payment_status,
+          travel_fee, service_address, notes, stripe_checkout_session_id, stripe_payment_intent_id
+        ) VALUES (?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, 0, '', ?, ?, ?)`,
+        [
+          identifier,
+          pending.client_id,
+          staffId,
+          scheduledDate,
+          startTime,
+          endTime,
+          totalPrice,
+          currency,
+          amountPaid,
+          amountPaid,
+          paymentStatus,
+          visitNoteParts.join("\n"),
+          pending.stripe_checkout_session_id,
+          pending.stripe_payment_intent_id,
+        ],
+      );
+      appointmentId = Number(aptResult.lastInsertRowid);
+
+      await run(
+        "INSERT INTO appointment_notes (appointment_id, content) VALUES (?, ?)",
+        [
+          appointmentId,
+          `Captured open payment ${currency} ${amountPaid.toFixed(2)} as a completed visit`,
+        ],
+      );
+
+      await run(
+        `UPDATE payments SET appointment_id = ? WHERE stripe_checkout_session_id = ? AND appointment_id IS NULL`,
+        [appointmentId, pending.stripe_checkout_session_id],
+      );
+
+      const captureNotes = note
+        ? `${pending.notes ? `${pending.notes}\n` : ""}Captured (visit): ${note}`
+        : `${pending.notes ? `${pending.notes}\n` : ""}Captured with visit recorded`;
+
+      await run(
+        `UPDATE pending_payments
+         SET status = 'captured', appointment_id = ?, staff_id = COALESCE(?, staff_id), notes = ?, applied_at = datetime('now')
+         WHERE id = ?`,
+        [appointmentId, staffId, captureNotes.trim(), id],
+      );
+    } else {
+      const captureNotes = note
+        ? `${pending.notes ? `${pending.notes}\n` : ""}Captured (money only): ${note}`
+        : `${pending.notes ? `${pending.notes}\n` : ""}Captured — money only, no visit`;
+
+      await run(
+        `UPDATE pending_payments SET status = 'captured', notes = ?, applied_at = datetime('now') WHERE id = ?`,
+        [captureNotes.trim(), id],
+      );
+    }
+
+    const row = await loadPendingWithClient(id);
+    if (!row) return c.json({ error: "Pending payment not found" }, 404);
+    return c.json({
+      pending_payment: formatPending(row),
+      appointment_id: appointmentId,
+    });
+  }) as any);
+
+  const reviewPreview = createRoute({
+    method: "get",
+    path: "/api/pending-payments/{id}/review-preview",
+    request: {
+      params: z.object({ id: z.coerce.number().int() }),
+      query: z.object({
+        email: z.string().optional(),
+        phone: z.string().optional(),
+      }),
+    },
+    responses: {
+      200: {
+        description: "Client review preview with match collisions",
+        content: {
+          "application/json": {
+            schema: z.object({
+              pending_payment: PendingPaymentSchema,
+              matches: z.array(ClientMatchSchema),
+            }),
+          },
+        },
+      },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(reviewPreview, (async (c: any) => {
+    const { id } = c.req.valid("param");
+    const q = c.req.valid("query");
+    const pending = await loadPendingWithClient(id);
+    if (!pending) return c.json({ error: "Pending payment not found" }, 404);
+
+    const email = (q.email ?? pending.client_email ?? "").trim();
+    const phone = (q.phone ?? pending.client_phone ?? "").trim();
+    const matches = await findClientMatches({
+      email,
+      phone,
+      excludeClientId: pending.client_id,
+    });
+
+    return c.json({
+      pending_payment: formatPending(pending),
+      matches,
+    });
+  }) as any);
+
+  const reviewClient = createRoute({
+    method: "post",
+    path: "/api/pending-payments/{id}/review",
+    request: {
+      params: z.object({ id: z.coerce.number().int() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              name: z.string().min(1),
+              email: z.string().min(1),
+              phone: z.string().optional().default(""),
+              merge_client_id: z.number().int().optional(),
+              acknowledge_phone_match: z.boolean().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Client reviewed and approved",
+        content: {
+          "application/json": {
+            schema: z.object({ pending_payment: PendingPaymentSchema }),
+          },
+        },
+      },
+      400: { description: "Invalid", content: { "application/json": { schema: ErrorSchema } } },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+  });
+
+  app.openapi(reviewClient, (async (c: any) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const pending = await get<PendingRow>("SELECT * FROM pending_payments WHERE id = ?", [id]);
+    if (!pending) return c.json({ error: "Pending payment not found" }, 404);
+    if (pending.status !== "open") {
+      return c.json({ error: "Only open pending payments can be reviewed" }, 400);
+    }
+
+    const name = body.name.trim();
+    if (!name) return c.json({ error: "Name is required" }, 400);
+
+    const parsed = parseRequiredBookingEmail(body.email);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const email = parsed.email;
+    const phone = (body.phone ?? "").trim();
+
+    const matches = await findClientMatches({
+      email,
+      phone,
+      excludeClientId: pending.client_id,
+    });
+    const emailMatches = matches.filter((m) => m.match === "email" || m.match === "both");
+    const phoneOnlyMatches = matches.filter((m) => m.match === "phone");
+
+    let targetClientId = pending.client_id;
+    const mergeId = body.merge_client_id;
+
+    if (mergeId != null) {
+      const mergeTarget = matches.find((m) => m.id === mergeId)
+        ?? await get<{ id: number }>("SELECT id FROM clients WHERE id = ?", [mergeId]);
+      if (!mergeTarget) return c.json({ error: "Merge target client not found" }, 400);
+      targetClientId = mergeId;
+    } else if (emailMatches.length > 0) {
+      return c.json(
+        {
+          error:
+            "Email matches an existing client. Merge into that client, or change the email before approving.",
+        },
+        400,
+      );
+    } else if (phoneOnlyMatches.length > 0 && !body.acknowledge_phone_match) {
+      return c.json(
+        {
+          error:
+            "Phone matches an existing client. Merge into that client, or acknowledge the phone collision to keep this client.",
+        },
+        400,
+      );
+    }
+
+    const previousClientId = pending.client_id;
+
+    await run(
+      `UPDATE clients SET name = ?, email = ?, phone = ?, updated_at = datetime('now') WHERE id = ?`,
+      [name, email, phone, targetClientId],
     );
+
+    if (targetClientId !== previousClientId) {
+      await run(
+        `UPDATE pending_payments
+         SET client_id = ?, client_was_existing = 1, client_reviewed_at = datetime('now')
+         WHERE id = ?`,
+        [targetClientId, id],
+      );
+      await run(
+        "UPDATE payment_links SET client_id = ? WHERE pending_payment_id = ?",
+        [targetClientId, id],
+      );
+      await tryDeleteOrphanClient(previousClientId);
+    } else {
+      await run(
+        `UPDATE pending_payments SET client_reviewed_at = datetime('now') WHERE id = ?`,
+        [id],
+      );
+    }
+
+    const row = await loadPendingWithClient(id);
     if (!row) return c.json({ error: "Pending payment not found" }, 404);
     return c.json({ pending_payment: formatPending(row) });
   }) as any);

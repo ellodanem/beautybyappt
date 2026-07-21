@@ -29,6 +29,7 @@ export type PendingPayment = {
   notes: string;
   status: string;
   client_was_existing: boolean;
+  client_reviewed_at: string | null;
   appointment_id: number | null;
   created_at: string;
   applied_at: string | null;
@@ -38,10 +39,268 @@ export type PendingPayment = {
   staff_name?: string | null;
 };
 
+type ClientMatch = {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  match: "email" | "phone" | "both";
+};
+
 function daysAgo(iso: string): number {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return 0;
   return Math.floor((Date.now() - t) / (24 * 60 * 60 * 1000));
+}
+
+function matchLabel(kind: ClientMatch["match"]): string {
+  if (kind === "both") return "Email + phone";
+  if (kind === "email") return "Email";
+  return "Phone";
+}
+
+function ReviewClientDialog({
+  pending,
+  onClose,
+  onReviewed,
+}: {
+  pending: PendingPayment;
+  onClose: () => void;
+  onReviewed: (updated: PendingPayment) => void;
+}) {
+  const { setError } = useApp();
+  const [name, setName] = useState(pending.client_name || "");
+  const [email, setEmail] = useState(pending.client_email || "");
+  const [phone, setPhone] = useState(pending.client_phone || "");
+  const [matches, setMatches] = useState<ClientMatch[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(true);
+  const [mergeClientId, setMergeClientId] = useState<number | null>(null);
+  const [acknowledgePhone, setAcknowledgePhone] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadMatches = useCallback(async (nextEmail: string, nextPhone: string) => {
+    setLoadingMatches(true);
+    try {
+      const params = new URLSearchParams();
+      if (nextEmail.trim()) params.set("email", nextEmail.trim());
+      if (nextPhone.trim()) params.set("phone", nextPhone.trim());
+      const qs = params.toString();
+      const res = await api<{ matches: ClientMatch[] }>(
+        "GET",
+        `/api/pending-payments/${pending.id}/review-preview${qs ? `?${qs}` : ""}`,
+      );
+      setMatches(res.matches);
+      setMergeClientId((prev) => {
+        if (prev != null && res.matches.some((m) => m.id === prev)) return prev;
+        return null;
+      });
+      setAcknowledgePhone(false);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingMatches(false);
+    }
+  }, [pending.id, setError]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      void loadMatches(email, phone);
+    }, 350);
+    return () => window.clearTimeout(handle);
+  }, [email, phone, loadMatches]);
+
+  const emailMatches = matches.filter((m) => m.match === "email" || m.match === "both");
+  const phoneOnlyMatches = matches.filter((m) => m.match === "phone");
+  const requiresMerge = emailMatches.length > 0 && mergeClientId == null;
+  const requiresPhoneAck =
+    mergeClientId == null && phoneOnlyMatches.length > 0 && emailMatches.length === 0 && !acknowledgePhone;
+
+  const handleApprove = async () => {
+    if (!name.trim()) {
+      setError("Name is required");
+      return;
+    }
+    if (requiresMerge) {
+      setError("Email matches an existing client — choose who to merge into, or change the email.");
+      return;
+    }
+    if (requiresPhoneAck) {
+      setError("Acknowledge the phone match, or merge into that client.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await api<{ pending_payment: PendingPayment }>(
+        "POST",
+        `/api/pending-payments/${pending.id}/review`,
+        {
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          merge_client_id: mergeClientId ?? undefined,
+          acknowledge_phone_match:
+            mergeClientId == null && phoneOnlyMatches.length > 0 ? true : undefined,
+        },
+      );
+      onReviewed(res.pending_payment);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>
+            {pending.client_reviewed_at ? "Re-review client" : "Review client"}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Confirm payer details before applying this credit. Fix typos, merge duplicates, then approve.
+            </p>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="review-name">Name</Label>
+              <Input
+                id="review-name"
+                className="h-11"
+                value={name}
+                onChange={(e) => setName((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="review-email">Email</Label>
+              <Input
+                id="review-email"
+                type="email"
+                className="h-11"
+                value={email}
+                onChange={(e) => setEmail((e.target as HTMLInputElement).value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="review-phone">Phone</Label>
+              <Input
+                id="review-phone"
+                className="h-11"
+                value={phone}
+                onChange={(e) => setPhone((e.target as HTMLInputElement).value)}
+              />
+            </div>
+
+            <div className="space-y-2 rounded-lg border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">Possible matches</p>
+                {loadingMatches && (
+                  <span className="text-xs text-muted-foreground">Checking…</span>
+                )}
+              </div>
+
+              {!loadingMatches && matches.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  No other clients match this email or phone.
+                </p>
+              )}
+
+              {matches.length > 0 && (
+                <ul className="space-y-2">
+                  {matches.map((match) => {
+                    const selected = mergeClientId === match.id;
+                    return (
+                      <li key={match.id}>
+                        <button
+                          type="button"
+                          className={cn(
+                            "w-full rounded-md border px-3 py-2 text-left transition-colors",
+                            selected
+                              ? "border-primary bg-primary/5"
+                              : "border-input hover:bg-muted/60",
+                          )}
+                          onClick={() => {
+                            setMergeClientId(selected ? null : match.id);
+                            setAcknowledgePhone(false);
+                          }}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium">{match.name}</span>
+                            <Pill className="border-transparent bg-secondary text-secondary-foreground">
+                              {matchLabel(match.match)}
+                            </Pill>
+                            {selected && (
+                              <Pill className="border-transparent bg-primary text-primary-foreground">
+                                Merge into this
+                              </Pill>
+                            )}
+                          </div>
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                            {[match.email, match.phone].filter(Boolean).join(" · ")}
+                          </p>
+                          {(match.name.trim().toLowerCase() !== name.trim().toLowerCase()) && (
+                            <p className="mt-1 text-xs text-amber-800">
+                              Name differs from form (“{match.name}” vs “{name || "blank"}”). Approving
+                              will update the merged client with the fields above.
+                            </p>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {emailMatches.length > 0 && mergeClientId == null && (
+                <p className="text-sm text-amber-900">
+                  Email already belongs to another client. Select a match to merge, or change the email.
+                </p>
+              )}
+
+              {phoneOnlyMatches.length > 0 && emailMatches.length === 0 && mergeClientId == null && (
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={acknowledgePhone}
+                    onChange={(e) => setAcknowledgePhone((e.target as HTMLInputElement).checked)}
+                  />
+                  <span>
+                    Phone matches another client (possible shared number). Keep this as a separate
+                    client, or tap a match above to merge.
+                  </span>
+                </label>
+              )}
+
+              {mergeClientId == null && matches.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Approving keeps client #{pending.client_id} with the details above.
+                </p>
+              )}
+              {mergeClientId != null && (
+                <p className="text-xs text-muted-foreground">
+                  This credit will move onto the selected client. The form fields above become their
+                  saved name, email, and phone.
+                </p>
+              )}
+            </div>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={saving || requiresMerge || requiresPhoneAck || !name.trim()}
+            onClick={handleApprove}
+          >
+            {saving ? "Saving…" : "Approve client"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function ApplyPendingDialog({
@@ -312,11 +571,146 @@ function ApplyPendingDialog({
   );
 }
 
+function CapturePendingDialog({
+  pending,
+  onClose,
+  onCaptured,
+}: {
+  pending: PendingPayment;
+  onClose: () => void;
+  onCaptured: (appointmentId: number | null) => void;
+}) {
+  const { staffLookup, setError } = useApp();
+  const [mode, setMode] = useState<"money_only" | "record_visit">("money_only");
+  const [staffId, setStaffId] = useState(pending.staff_id ? String(pending.staff_id) : "");
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleCapture = async () => {
+    setSaving(true);
+    try {
+      const res = await api<{ appointment_id: number | null }>(
+        "POST",
+        `/api/pending-payments/${pending.id}/capture`,
+        {
+          mode,
+          note: note.trim() || undefined,
+          staff_id: mode === "record_visit" ? (staffId ? parseInt(staffId, 10) : null) : undefined,
+          scheduled_date: mode === "record_visit" ? date : undefined,
+        },
+      );
+      onCaptured(res.appointment_id ?? null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(open: boolean) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Capture payment</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Keep {formatMoney(pending.amount_paid, pending.currency)} without linking to an existing
+              booking. Use this for walk-in cash, or when the visit was already completed another way.
+            </p>
+
+            <div className="space-y-2 rounded-lg border p-3">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="capture-mode"
+                  className="mt-1"
+                  checked={mode === "money_only"}
+                  onChange={() => setMode("money_only")}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Money only</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    Record the payment. Does not add a visit.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="radio"
+                  name="capture-mode"
+                  className="mt-1"
+                  checked={mode === "record_visit"}
+                  onChange={() => setMode("record_visit")}
+                />
+                <span className="text-sm">
+                  <span className="font-medium">Record a visit</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    Create a completed appointment so it counts toward client visits
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            {mode === "record_visit" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Visit date</Label>
+                  <Input
+                    type="date"
+                    className="h-11"
+                    value={date}
+                    onChange={(e: Event) => setDate((e.target as HTMLInputElement).value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Staff</Label>
+                  <select
+                    className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={staffId}
+                    onChange={(e: Event) => setStaffId((e.target as HTMLSelectElement).value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {staffLookup.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="capture-note">Note (optional)</Label>
+              <Input
+                id="capture-note"
+                className="h-11"
+                placeholder="e.g. Walk-in cash · already completed"
+                value={note}
+                onChange={(e: Event) => setNote((e.target as HTMLInputElement).value)}
+              />
+            </div>
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={saving} onClick={handleCapture}>
+            {saving ? "Saving…" : mode === "record_visit" ? "Capture & record visit" : "Capture payment"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PendingPaymentsPage() {
   const { navigate, setError } = useApp();
   const [items, setItems] = useState<PendingPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reviewTarget, setReviewTarget] = useState<PendingPayment | null>(null);
   const [applyTarget, setApplyTarget] = useState<PendingPayment | null>(null);
+  const [captureTarget, setCaptureTarget] = useState<PendingPayment | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -350,8 +744,8 @@ export function PendingPaymentsPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Pending payments</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Open credits from payment links — an audit trail of who paid. Linking to an appointment is optional.
-          No automatic refunds; refund in Stripe, then mark here.
+          Open credits from payment links. Review the client first, then apply to a booking, capture
+          the payment (with or without a visit), or mark refunded after Stripe.
         </p>
       </div>
 
@@ -368,17 +762,24 @@ export function PendingPaymentsPage() {
             <ul className="divide-y">
               {items.map((item) => {
                 const age = daysAgo(item.created_at);
+                const reviewed = Boolean(item.client_reviewed_at);
                 return (
                   <li
                     key={item.id}
                     className={cn(
                       "flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between",
-                      item.client_was_existing && "bg-amber-50/60 -mx-2 px-2 rounded-md",
+                      !reviewed && "bg-amber-50/60 -mx-2 px-2 rounded-md",
+                      reviewed && item.client_was_existing && "bg-muted/40 -mx-2 px-2 rounded-md",
                     )}
                   >
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{item.client_name || "Client"}</span>
+                        {reviewed ? (
+                          <Pill className="border-transparent bg-emerald-100 text-emerald-900">Approved</Pill>
+                        ) : (
+                          <Pill className="border-transparent bg-amber-100 text-amber-900">Needs review</Pill>
+                        )}
                         {item.client_was_existing ? (
                           <Pill className="border-transparent bg-secondary text-secondary-foreground">Existing</Pill>
                         ) : (
@@ -405,8 +806,34 @@ export function PendingPaymentsPage() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" onClick={() => setApplyTarget(item)}>Apply to appointment</Button>
-                      <Button size="sm" variant="outline" onClick={() => markRefunded(item.id)}>Mark refunded</Button>
+                      <Button
+                        size="sm"
+                        variant={reviewed ? "outline" : "default"}
+                        onClick={() => setReviewTarget(item)}
+                      >
+                        {reviewed ? "Re-review" : "Review client"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={reviewed ? "default" : "outline"}
+                        disabled={!reviewed}
+                        title={reviewed ? undefined : "Approve the client before applying"}
+                        onClick={() => setApplyTarget(item)}
+                      >
+                        Apply to appointment
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!reviewed}
+                        title={reviewed ? undefined : "Approve the client before capturing"}
+                        onClick={() => setCaptureTarget(item)}
+                      >
+                        Capture
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => markRefunded(item.id)}>
+                        Mark refunded
+                      </Button>
                     </div>
                   </li>
                 );
@@ -416,6 +843,17 @@ export function PendingPaymentsPage() {
         </CardContent>
       </Card>
 
+      {reviewTarget && (
+        <ReviewClientDialog
+          pending={reviewTarget}
+          onClose={() => setReviewTarget(null)}
+          onReviewed={(updated) => {
+            setReviewTarget(null);
+            setItems((prev) => prev.map((row) => (row.id === updated.id ? { ...row, ...updated } : row)));
+          }}
+        />
+      )}
+
       {applyTarget && (
         <ApplyPendingDialog
           pending={applyTarget}
@@ -423,6 +861,21 @@ export function PendingPaymentsPage() {
           onApplied={(appointmentId) => {
             setApplyTarget(null);
             navigate(`/appointments/${appointmentId}`);
+          }}
+        />
+      )}
+
+      {captureTarget && (
+        <CapturePendingDialog
+          pending={captureTarget}
+          onClose={() => setCaptureTarget(null)}
+          onCaptured={(appointmentId) => {
+            setCaptureTarget(null);
+            if (appointmentId != null) {
+              navigate(`/appointments/${appointmentId}`);
+            } else {
+              void load();
+            }
           }}
         />
       )}

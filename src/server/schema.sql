@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS pending_payments (
   notes TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
   client_was_existing INTEGER NOT NULL DEFAULT 0,
+  client_reviewed_at TEXT,
   appointment_id INTEGER REFERENCES appointments(id) ON DELETE SET NULL,
   stripe_checkout_session_id TEXT,
   stripe_payment_intent_id TEXT,
