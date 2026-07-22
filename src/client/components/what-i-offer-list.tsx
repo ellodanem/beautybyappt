@@ -3,7 +3,7 @@ import { useApp } from "../context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Sparkles, PartyPopper, ChevronDown, ChevronRight } from "lucide-preact";
+import { Plus, Sparkles, PartyPopper, ChevronDown, ChevronRight, Archive } from "lucide-preact";
 import { formatMoney } from "../../shared/currency";
 import { ShareOfferingLink } from "./share-offering-link";
 import { ShareAnytimeLink } from "./share-anytime-link";
@@ -17,9 +17,30 @@ const EVENT_STATUS: Record<OfferingStatus, { label: string; variant: "default" |
   archived: { label: "Archived", variant: "outline" },
 };
 
+/** Last end date from list `date_summary` like `2026-07-21` or `2026-07-21–2026-07-23, 2026-07-28`. */
+function lastEventEndDate(dateSummary: string): string | null {
+  if (!dateSummary) return null;
+  let last: string | null = null;
+  for (const part of dateSummary.split(", ")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const end = trimmed.includes("–") ? trimmed.split("–")[1]?.trim() : trimmed;
+    if (end && (!last || end > last)) last = end;
+  }
+  return last;
+}
+
+function eventDatesHavePassed(dateSummary: string): boolean {
+  const last = lastEventEndDate(dateSummary);
+  if (!last) return false;
+  const today = new Date().toISOString().split("T")[0];
+  return last < today;
+}
+
 export function WhatIOfferList() {
-  const { services, offerings, fetchOfferings, navigate, defaultCurrency } = useApp();
+  const { services, offerings, fetchOfferings, navigate, defaultCurrency, archiveOffering, setError } = useApp();
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [archivingId, setArchivingId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchOfferings().catch(() => {});
@@ -30,8 +51,25 @@ export function WhatIOfferList() {
   const archivedEvents = offerings.filter((e) => e.status === "archived");
   const hasAnything = activeServices.length > 0 || activeEvents.length > 0 || archivedEvents.length > 0;
 
+  const handleQuickArchive = async (e: Event, eventId: number) => {
+    e.stopPropagation();
+    if (archivingId != null) return;
+    if (!confirm("Archive this event? The public booking page will stop working. Existing appointments stay on your calendar.")) {
+      return;
+    }
+    setArchivingId(eventId);
+    try {
+      await archiveOffering(eventId);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setArchivingId(null);
+    }
+  };
+
   const renderEventCard = (event: (typeof offerings)[number]) => {
     const st = EVENT_STATUS[event.status];
+    const showQuickArchive = event.status === "live" && eventDatesHavePassed(event.date_summary);
     return (
       <Card
         key={`e-${event.id}`}
@@ -49,11 +87,26 @@ export function WhatIOfferList() {
               {event.date_summary || "Dates not set"} · {formatMoney(event.base_price, event.currency || defaultCurrency)}
             </p>
           </div>
-          <ShareOfferingLink
-            slug={event.slug}
-            name={event.name}
-            disabled={event.status !== "live"}
-          />
+          <div className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            {showQuickArchive && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground"
+                aria-label={`Archive ${event.name}`}
+                disabled={archivingId === event.id}
+                onClick={(e) => handleQuickArchive(e, event.id)}
+              >
+                <Archive className="h-4 w-4" />
+              </Button>
+            )}
+            <ShareOfferingLink
+              slug={event.slug}
+              name={event.name}
+              disabled={event.status !== "live"}
+            />
+          </div>
         </CardContent>
       </Card>
     );
