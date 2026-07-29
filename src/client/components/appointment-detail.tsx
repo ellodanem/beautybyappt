@@ -81,7 +81,13 @@ export function AppointmentDetail() {
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateEmailSending, setTemplateEmailSending] = useState(false);
   const [templateEmailSent, setTemplateEmailSent] = useState(false);
+  const [templateEmailSentName, setTemplateEmailSentName] = useState("");
   const [showChangeTime, setShowChangeTime] = useState(false);
+
+  useEffect(() => {
+    setTemplateEmailSent(false);
+    setTemplateEmailSentName("");
+  }, [apt?.id]);
 
   useEffect(() => {
     if (!apt) return;
@@ -102,7 +108,6 @@ export function AppointmentDetail() {
     setExtrasSaved(false);
     const paymentReminder = emailTemplates.find((t) => t.slug === "payment_reminder");
     setSelectedTemplateId(paymentReminder ? String(paymentReminder.id) : emailTemplates[0] ? String(emailTemplates[0].id) : "");
-    setTemplateEmailSent(false);
   }, [apt?.id, apt?.total_price, apt?.deposit_amount, apt?.amount_paid, apt?.appointment_offering_addons, apt?.appointment_service_addons, apt?.offering_id, emailTemplates]);
 
   const offeringAddons = apt?.offering_addons ?? [];
@@ -257,13 +262,19 @@ export function AppointmentDetail() {
   const handleSendTemplateEmail = async () => {
     const templateId = parseInt(selectedTemplateId, 10);
     if (!templateId) return;
+    const templateName = emailTemplates.find((t) => t.id === templateId)?.name ?? "Email";
     setTemplateEmailSending(true);
     setTemplateEmailSent(false);
+    setTemplateEmailSentName("");
     setError(null);
     try {
       await sendAppointmentTemplateEmail(apt.id, templateId);
+      setTemplateEmailSentName(templateName);
       setTemplateEmailSent(true);
-      window.setTimeout(() => setTemplateEmailSent(false), 3000);
+      window.setTimeout(() => {
+        setTemplateEmailSent(false);
+        setTemplateEmailSentName("");
+      }, 5000);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -715,7 +726,12 @@ export function AppointmentDetail() {
                     {templateEmailSending ? "Sending…" : "Send email"}
                   </Button>
                   {templateEmailSent && (
-                    <p className="text-sm text-emerald-600">Email sent</p>
+                    <p className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>
+                        {templateEmailSentName} sent to {apt.client_email}.
+                      </span>
+                    </p>
                   )}
                 </>
               )}
