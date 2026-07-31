@@ -15,7 +15,7 @@ import {
   type EmailProvider,
 } from "./email-providers.js";
 import { processScheduledNotifications } from "./notification-rules.js";
-import type { StripeEnv } from "./stripe.js";
+import { appBaseUrl, type StripeEnv } from "./stripe.js";
 
 export type NotificationEnv = EmailEnv;
 
@@ -28,6 +28,7 @@ export interface NotificationSettings {
   email_provider: EmailProvider;
   remind_24h_enabled: boolean;
   remind_2h_enabled: boolean;
+  staff_booking_email_enabled: boolean;
 }
 
 interface AppointmentNotificationContext {
@@ -47,7 +48,9 @@ interface AppointmentNotificationContext {
   client_email: string;
   client_phone: string;
   client_address: string;
+  staff_id: number | null;
   staff_name: string | null;
+  staff_email: string | null;
   offering_name: string | null;
   service_names: string[];
 }
@@ -58,6 +61,7 @@ type SchedulableContext = {
 };
 
 const TEMPLATE_CONFIRMATION = "booking_confirmation";
+const TEMPLATE_STAFF_BOOKING = "staff_booking_notification";
 const TEMPLATE_REMINDER_24H = "reminder_24h";
 const TEMPLATE_REMINDER_2H = "reminder_2h";
 
@@ -117,6 +121,7 @@ export async function getNotificationSettings(env: NotificationEnv): Promise<Not
     email_provider: await getEmailProvider(),
     remind_24h_enabled: await metaFlag("remind_24h_enabled", true),
     remind_2h_enabled: await metaFlag("remind_2h_enabled", true),
+    staff_booking_email_enabled: await metaFlag("notify_staff_booking_email_enabled", true),
   };
 }
 
@@ -161,7 +166,9 @@ async function loadAppointmentContext(appointmentId: number): Promise<Appointmen
     client_email: string;
     client_phone: string;
     client_address: string;
+    staff_id: number | null;
     staff_name: string | null;
+    staff_email: string | null;
     offering_name: string | null;
   }>(
     `SELECT a.id, a.identifier, a.scheduled_date, a.start_time, a.end_time,
@@ -169,7 +176,8 @@ async function loadAppointmentContext(appointmentId: number): Promise<Appointmen
             a.service_address, a.payment_status,
             cl.name as client_name, cl.email as client_email, cl.phone as client_phone,
             cl.address as client_address,
-            s.name as staff_name, o.name as offering_name
+            a.staff_id, s.name as staff_name, s.email as staff_email,
+            o.name as offering_name
      FROM appointments a
      LEFT JOIN clients cl ON cl.id = a.client_id
      LEFT JOIN staff s ON s.id = a.staff_id
@@ -201,6 +209,17 @@ async function alreadySent(appointmentId: number, template: string): Promise<boo
      WHERE appointment_id = ? AND template = ? AND status IN ('sent', 'placeholder')
      LIMIT 1`,
     [appointmentId, template],
+  );
+  return Boolean(row);
+}
+
+/** Staff notify: treat skipped as done so webhook + success page don't re-log forever. */
+async function alreadyHandledStaffBooking(appointmentId: number): Promise<boolean> {
+  const row = await get<{ id: number }>(
+    `SELECT id FROM notification_log
+     WHERE appointment_id = ? AND template = ? AND status IN ('sent', 'placeholder', 'skipped')
+     LIMIT 1`,
+    [appointmentId, TEMPLATE_STAFF_BOOKING],
   );
   return Boolean(row);
 }
@@ -450,6 +469,172 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function paymentStatusLabel(ctx: AppointmentNotificationContext): string {
+  const currency = ctx.currency || "USD";
+  if (ctx.amount_paid <= 0) {
+    if (ctx.deposit_amount > 0) {
+      return `Unpaid — deposit ${formatMoney(ctx.deposit_amount, currency)} expected`;
+    }
+    return "Unpaid";
+  }
+  const balance = appointmentBalance(ctx);
+  if (balance > 0) {
+    return `Deposit paid ${formatMoney(ctx.amount_paid, currency)} — ${formatMoney(balance, currency)} due`;
+  }
+  return `Paid in full ${formatMoney(ctx.amount_paid, currency)}`;
+}
+
+function buildStaffBookingText(
+  ctx: AppointmentNotificationContext,
+  branding: { business_name: string },
+  dashboardUrl: string,
+): { subject: string; text: string; html: string } {
+  const businessName = branding.business_name.trim() || PLATFORM_NAME;
+  const dateLabel = formatAppointmentDate(ctx.scheduled_date);
+  const timeLabel = `${formatAppointmentTime(ctx.start_time)} – ${formatAppointmentTime(ctx.end_time)}`;
+  const currency = ctx.currency || "USD";
+  const greetingName = ctx.staff_name?.trim() || "there";
+
+  const lines: string[] = [
+    `Hi ${greetingName},`,
+    "",
+    `New booking for ${businessName}.`,
+    "",
+    `Reference: ${ctx.identifier}`,
+    `Client: ${ctx.client_name}`,
+  ];
+
+  if (ctx.client_phone.trim()) lines.push(`Phone: ${ctx.client_phone.trim()}`);
+  if (ctx.client_email.trim()) lines.push(`Email: ${ctx.client_email.trim()}`);
+
+  lines.push(`Date: ${dateLabel}`);
+  lines.push(`Time: ${timeLabel}`);
+
+  if (ctx.offering_name) lines.push(`Event: ${ctx.offering_name}`);
+  if (ctx.service_names.length > 0) lines.push(`Services: ${ctx.service_names.join(", ")}`);
+  if (ctx.staff_name) lines.push(`Assigned to: ${ctx.staff_name}`);
+
+  const serviceTotal = serviceSubtotal(ctx);
+  lines.push(`Services total: ${formatMoney(serviceTotal, currency)}`);
+  if (ctx.travel_fee > 0) {
+    lines.push(`Travel fee: ${formatMoney(ctx.travel_fee, currency)}`);
+  }
+  lines.push(`Total: ${formatMoney(ctx.total_price, currency)}`);
+  lines.push(`Payment: ${paymentStatusLabel(ctx)}`);
+
+  const loc = locationLine(ctx);
+  if (loc) {
+    lines.push("");
+    lines.push(loc);
+  }
+
+  if (dashboardUrl) {
+    lines.push("");
+    lines.push(`View appointment: ${dashboardUrl}`);
+  }
+
+  lines.push("");
+  lines.push(`— ${businessName}`);
+
+  const subject = `New booking — ${ctx.client_name} · ${dateLabel}`;
+
+  const htmlParts = lines
+    .filter((line) => line !== "")
+    .map((line) => {
+      if (line.startsWith("Hi ")) return `<p>${escapeHtml(line)}</p>`;
+      if (line.startsWith("New booking")) return `<p style="font-weight:600">${escapeHtml(line)}</p>`;
+      if (line.startsWith("View appointment:")) {
+        const url = line.replace("View appointment: ", "");
+        return `<p style="margin:16px 0"><a href="${escapeHtml(url)}" style="color:#111">Open in dashboard</a></p>`;
+      }
+      if (line.startsWith("— ")) return `<p style="color:#666;margin-top:24px">${escapeHtml(line)}</p>`;
+      return `<p style="margin:4px 0">${escapeHtml(line)}</p>`;
+    });
+
+  const html = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111;max-width:520px;margin:0 auto;padding:24px">
+<h1 style="font-size:20px;margin:0 0 16px">${escapeHtml(businessName)}</h1>
+${htmlParts.join("\n")}
+</body></html>`;
+
+  return { subject, text: lines.join("\n"), html };
+}
+
+async function resolveStaffNotificationEmails(
+  ctx: AppointmentNotificationContext,
+): Promise<string[]> {
+  const emails = new Set<string>();
+  const assigned = ctx.staff_email?.trim().toLowerCase();
+  if (assigned) {
+    emails.add(assigned);
+  } else {
+    const admins = await query<{ email: string }>(
+      `SELECT email FROM staff
+       WHERE active = 1 AND is_admin = 1
+         AND email IS NOT NULL AND TRIM(email) != ''`,
+    );
+    for (const row of admins) {
+      const email = row.email.trim().toLowerCase();
+      if (email) emails.add(email);
+    }
+  }
+
+  const clientEmail = ctx.client_email.trim().toLowerCase();
+  if (clientEmail) emails.delete(clientEmail);
+
+  return [...emails];
+}
+
+export async function sendStaffBookingNotification(
+  env: NotificationEnv,
+  appointmentId: number,
+): Promise<void> {
+  if (await alreadyHandledStaffBooking(appointmentId)) return;
+
+  const settings = await getNotificationSettings(env);
+  if (!settings.email_enabled || !settings.staff_booking_email_enabled) return;
+
+  const ctx = await loadAppointmentContext(appointmentId);
+  if (!ctx) return;
+
+  const recipients = await resolveStaffNotificationEmails(ctx);
+  if (recipients.length === 0) {
+    await logNotification(
+      appointmentId,
+      "email",
+      "",
+      TEMPLATE_STAFF_BOOKING,
+      "skipped",
+      undefined,
+      "No staff email on assigned artist (or admin fallback)",
+    );
+    return;
+  }
+
+  const branding = await getBranding();
+  const dashboardUrl = `${appBaseUrl(env)}/appointments/${ctx.id}`;
+  const { subject, text, html } = buildStaffBookingText(ctx, branding, dashboardUrl);
+  const notConfiguredReason = emailNotConfiguredReason(settings.email_provider);
+
+  for (const email of recipients) {
+    const result = await sendProviderEmail(
+      env,
+      email,
+      branding.business_name.trim(),
+      settings.email_reply_to,
+      subject,
+      text,
+      html,
+    );
+    if (result.skipped) {
+      await logNotification(appointmentId, "email", email, TEMPLATE_STAFF_BOOKING, "skipped", undefined, notConfiguredReason);
+    } else if (result.error) {
+      await logNotification(appointmentId, "email", email, TEMPLATE_STAFF_BOOKING, "failed", undefined, result.error);
+    } else {
+      await logNotification(appointmentId, "email", email, TEMPLATE_STAFF_BOOKING, "sent", result.providerId);
+    }
+  }
+}
+
 export async function sendBookingConfirmation(
   env: NotificationEnv,
   appointmentId: number,
@@ -625,7 +810,11 @@ export function scheduleBookingConfirmation(
   options?: { receipt?: boolean },
 ): void {
   if (!appointmentId) return;
-  const task = sendBookingConfirmation(runtimeEnv(ctx.env), appointmentId, options);
+  const env = runtimeEnv(ctx.env);
+  const task = Promise.all([
+    sendBookingConfirmation(env, appointmentId, options),
+    sendStaffBookingNotification(env, appointmentId),
+  ]).then(() => undefined);
   if (ctx.executionCtx) {
     ctx.executionCtx.waitUntil(task);
   } else {
@@ -649,6 +838,7 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
     email_provider: z.enum(["google", "resend", "smtp"]),
     remind_24h_enabled: z.boolean(),
     remind_2h_enabled: z.boolean(),
+    staff_booking_email_enabled: z.boolean(),
   });
 
   const getSettings = createRoute({
@@ -680,6 +870,7 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
               email_reply_to: z.string().optional(),
               remind_24h_enabled: z.boolean().optional(),
               remind_2h_enabled: z.boolean().optional(),
+              staff_booking_email_enabled: z.boolean().optional(),
             }),
           },
         },
@@ -712,6 +903,9 @@ export function registerNotificationRoutes(app: OpenAPIHono<any>) {
     }
     if (body.remind_2h_enabled !== undefined) {
       await setMetaValue("remind_2h_enabled", body.remind_2h_enabled ? "1" : "0");
+    }
+    if (body.staff_booking_email_enabled !== undefined) {
+      await setMetaValue("notify_staff_booking_email_enabled", body.staff_booking_email_enabled ? "1" : "0");
     }
     return c.json(await getNotificationSettings(runtimeEnv(c.env) as NotificationEnv), 200);
   });

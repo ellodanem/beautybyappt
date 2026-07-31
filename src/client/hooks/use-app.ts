@@ -72,15 +72,26 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const [stripeWebhookConfigured, setStripeWebhookConfigured] = useState(false);
   const [stripePaymentsEnabled, setStripePaymentsEnabled] = useState(false);
   const [stripeFeePassthroughEnabled, setStripeFeePassthroughEnabled] = useState(false);
-  const [notificationSettings, setNotificationSettings] = useState({
+  const [notificationSettings, setNotificationSettings] = useState<{
+    email_enabled: boolean;
+    sms_enabled: boolean;
+    whatsapp_enabled: boolean;
+    email_reply_to: string;
+    email_configured: boolean;
+    email_provider: "google" | "resend" | "smtp";
+    remind_24h_enabled: boolean;
+    remind_2h_enabled: boolean;
+    staff_booking_email_enabled: boolean;
+  }>({
     email_enabled: true,
     sms_enabled: false,
     whatsapp_enabled: false,
     email_reply_to: "",
     email_configured: false,
-    email_provider: "google" as const,
+    email_provider: "google",
     remind_24h_enabled: true,
     remind_2h_enabled: true,
+    staff_booking_email_enabled: true,
   });
   const [emailDomain, setEmailDomain] = useState({
     resend_configured: false,
@@ -343,6 +354,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       email_provider: "google" | "resend" | "smtp";
       remind_24h_enabled: boolean;
       remind_2h_enabled: boolean;
+      staff_booking_email_enabled: boolean;
     }>("GET", "/api/settings/notifications");
     setNotificationSettings(data);
   }, []);
@@ -354,6 +366,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     email_reply_to?: string;
     remind_24h_enabled?: boolean;
     remind_2h_enabled?: boolean;
+    staff_booking_email_enabled?: boolean;
   }) => {
     const res = await api<{
       email_enabled: boolean;
@@ -364,6 +377,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
       email_provider: "google" | "resend" | "smtp";
       remind_24h_enabled: boolean;
       remind_2h_enabled: boolean;
+      staff_booking_email_enabled: boolean;
     }>("PUT", "/api/settings/notifications", data);
     setNotificationSettings(res);
   }, []);

@@ -72,6 +72,7 @@ export interface AppContextValue {
     email_provider: "google" | "resend" | "smtp";
     remind_24h_enabled: boolean;
     remind_2h_enabled: boolean;
+    staff_booking_email_enabled: boolean;
   };
   updateNotificationSettings: (data: {
     email_enabled?: boolean;
@@ -80,6 +81,7 @@ export interface AppContextValue {
     email_reply_to?: string;
     remind_24h_enabled?: boolean;
     remind_2h_enabled?: boolean;
+    staff_booking_email_enabled?: boolean;
   }) => Promise<void>;
 
   emailDomain: {

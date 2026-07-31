@@ -1202,7 +1202,7 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           <p className="text-muted-foreground">
-            Send clients a confirmation when an appointment is booked — via email today, with SMS and WhatsApp coming soon.
+            Send clients a confirmation when an appointment is booked, and email staff when a new booking lands — via email today, with SMS and WhatsApp coming soon.
           </p>
           <div className="rounded-lg border p-3">
             <p>
@@ -1241,6 +1241,33 @@ export function SettingsPage() {
               <span className="font-medium">Email confirmation</span>
               <span className="mt-1 block text-muted-foreground">
                 Includes date, time, location, travel fee, and payment receipt when applicable.
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={notificationSettings.staff_booking_email_enabled}
+              onChange={async (e) => {
+                setNotificationSaving(true);
+                try {
+                  await updateNotificationSettings({
+                    staff_booking_email_enabled: (e.target as HTMLInputElement).checked,
+                  });
+                  setNotificationSaved(true);
+                  setTimeout(() => setNotificationSaved(false), 2000);
+                } catch (err) {
+                  setError((err as Error).message);
+                } finally {
+                  setNotificationSaving(false);
+                }
+              }}
+            />
+            <span>
+              <span className="font-medium">Email staff on new booking</span>
+              <span className="mt-1 block text-muted-foreground">
+                Notifies the assigned staff member (falls back to admin staff if their email is blank). Uses the email on each staff profile.
               </span>
             </span>
           </label>

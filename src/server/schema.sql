@@ -132,6 +132,7 @@ INSERT OR IGNORE INTO _meta (key, value) VALUES ('notify_whatsapp_enabled', '0')
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('email_reply_to', '');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('remind_24h_enabled', '1');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('remind_2h_enabled', '1');
+INSERT OR IGNORE INTO _meta (key, value) VALUES ('notify_staff_booking_email_enabled', '1');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('stripe_payments_enabled', '0');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('business_utc_offset', '-4');
 INSERT OR IGNORE INTO _meta (key, value) VALUES ('business_country', 'LC');
