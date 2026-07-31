@@ -28,6 +28,9 @@ import { loadPendingPaymentSummary } from "./appointment-payments.js";
 import { blockingClientAppointmentsWhere, blockingClientBookingLinksWhere, countClientActiveBookings, detachClientBookingLinks, todayIsoDate, assertClientEmailForBooking } from "./clients.js";
 import { parseRequiredBookingEmail } from "../shared/email.js";
 import { statusesForScope } from "../shared/appointment-scope.js";
+import { CLOSEOUT_STATUSES } from "../shared/appointment-closeout.js";
+import { dateTimePartsInTimezone } from "../shared/locale.js";
+import { getBusinessLocale } from "./business-locale.js";
 import { deleteStaffCascade } from "./staff.js";
 import { registerAuthRoutes, createAuthMiddleware } from "./auth.js";
 
@@ -310,7 +313,19 @@ function getWeekDateRange(reference = new Date()): { start: string; end: string;
 app.openapi(getStats, async (c) => {
   const today = new Date().toISOString().split("T")[0];
   const { start: weekStart, end: weekEnd, days: weekDays } = getWeekDateRange();
-  const appointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments");
+  const locale = await getBusinessLocale();
+  const { date: businessDate, time: businessTime } = dateTimePartsInTimezone(locale.timezone);
+  const closeOutStatusPlaceholders = CLOSEOUT_STATUSES.map(() => "?").join(", ");
+  // Sidebar badge: ended appointments still open (need Completed / No show), not total inventory.
+  const appointments = await get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM appointments
+     WHERE status IN (${closeOutStatusPlaceholders})
+     AND (
+       scheduled_date < ?
+       OR (scheduled_date = ? AND substr(end_time, 1, 5) <= ?)
+     )`,
+    [...CLOSEOUT_STATUSES, businessDate, businessDate, businessTime],
+  );
   const clients = await get<{ count: number }>("SELECT COUNT(*) as count FROM clients");
   const staff = await get<{ count: number }>("SELECT COUNT(*) as count FROM staff WHERE active = 1");
   const services = await get<{ count: number }>("SELECT COUNT(*) as count FROM services WHERE active = 1");

@@ -122,3 +122,32 @@ export function formatTimeInTimezone(timeZone: string, at = new Date()): string 
     return "";
   }
 }
+
+/** Calendar date (YYYY-MM-DD) and 24h time (HH:MM) in a timezone. */
+export function dateTimePartsInTimezone(
+  timeZone: string,
+  at = new Date(),
+): { date: string; time: string } {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(at);
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((p) => p.type === type)?.value ?? "";
+    let hour = get("hour");
+    if (hour === "24") hour = "00";
+    return {
+      date: `${get("year")}-${get("month")}-${get("day")}`,
+      time: `${hour.padStart(2, "0")}:${get("minute").padStart(2, "0")}`,
+    };
+  } catch {
+    const iso = at.toISOString();
+    return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+  }
+}
